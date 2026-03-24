@@ -1,20 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
 import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
-
-import { formatEther, encodeFunctionData, parseEther } from 'viem'
+import { formatEther, encodeFunctionData, parseEther, isAddress } from 'viem'
 import { CONTRACTS, NFT_AUCTION_ADDR } from '../constants/contracts'
 import { APO_EGG_GIF, drillImgUrl, landImgUrl, ELEM_SVGS, ELEMS, RING_SVG } from '../constants/images'
 import './AssetsPage.css'
 
+// ── ABIs ─────────────────────────────────────────────────────────────────
 const ERC20_ABI=[
   {type:'function',name:'balanceOf',inputs:[{name:'a',type:'address'}],outputs:[{type:'uint256'}],stateMutability:'view'},
   {type:'function',name:'approve',inputs:[{name:'s',type:'address'},{name:'a',type:'uint256'}],outputs:[{type:'bool'}],stateMutability:'nonpayable'},
+  {type:'function',name:'transfer',inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{type:'bool'}],stateMutability:'nonpayable'},
 ]
 const NFT_ABI=[
-  {type:'function',name:'balanceOf',inputs:[{name:'o',type:'address'}],outputs:[{type:'uint256'}],stateMutability:'view'},
-  {type:'function',name:'tokenOfOwnerByIndex',inputs:[{name:'o',type:'address'},{name:'i',type:'uint256'}],outputs:[{type:'uint256'}],stateMutability:'view'},
   {type:'function',name:'setApprovalForAll',inputs:[{name:'op',type:'address'},{name:'v',type:'bool'}],outputs:[],stateMutability:'nonpayable'},
   {type:'function',name:'isApprovedForAll',inputs:[{name:'owner',type:'address'},{name:'op',type:'address'}],outputs:[{type:'bool'}],stateMutability:'view'},
+  {type:'function',name:'safeTransferFrom',inputs:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'id',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
 ]
 const APO_ABI=[{type:'function',name:'attrs',inputs:[{name:'id',type:'uint256'}],outputs:[{name:'strength',type:'uint8'},{name:'element',type:'uint8'}],stateMutability:'view'}]
 const DRL_ABI=[{type:'function',name:'attrs',inputs:[{name:'id',type:'uint256'}],outputs:[{name:'tier',type:'uint8'},{name:'affinity',type:'uint8'}],stateMutability:'view'}]
@@ -24,7 +24,6 @@ const MINING_ABI=[
   {type:'function',name:'slots',inputs:[{name:'l',type:'uint256'},{name:'i',type:'uint256'}],outputs:[{name:'apostleId',type:'uint256'},{name:'drillId',type:'uint256'},{name:'startTime',type:'uint256'}],stateMutability:'view'},
   {type:'function',name:'pendingRewards',inputs:[{name:'l',type:'uint256'}],outputs:[{type:'uint256[5]'}],stateMutability:'view'},
   {type:'function',name:'claimLandReward',inputs:[{name:'l',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
-  {type:'function',name:'startMining',inputs:[{name:'l',type:'uint256'},{name:'a',type:'uint256'},{name:'d',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
   {type:'function',name:'stopMining',inputs:[{name:'l',type:'uint256'},{name:'slot',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
 ]
 const AUC_ABI=[
@@ -46,6 +45,7 @@ const BB_ABI=[
   {type:'function',name:'buyDrillBoxBatch',inputs:[{name:'count',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
 ]
 
+// ── 工具 ──────────────────────────────────────────────────────────────────
 function fmtR(w,dp=3){return w?Number(formatEther(w)).toFixed(dp):'0'}
 function decodeAttr(a){if(!a)return[0,0,0,0,0];const b=BigInt(a);return[Number(b&0xffffn),Number((b>>16n)&0xffffn),Number((b>>32n)&0xffffn),Number((b>>48n)&0xffffn),Number((b>>64n)&0xffffn)]}
 function ElemIcon({i,size=15}){return <img src={ELEM_SVGS[i]} alt={ELEMS[i].name} style={{width:size,height:size,verticalAlign:'middle'}}/>}
@@ -59,15 +59,98 @@ const TABS=[
   {k:'mining',  label:'⚒️ 挖矿'},
 ]
 
-// ── BlindBox Tab ── 买盲盒 + 显示结果 ────────────────────────────────────
-function BlindBoxTab({pc, address, wc}){
-  const [apoPx, setApoPx] = useState(null)
-  const [drlPx, setDrlPx]  = useState(null)
-  const [buying, setBuying] = useState(null)
-  const [msg, setMsg]       = useState('')
-  const [results, setResults] = useState([])  // 购买记录
-  const [count, setCount]   = useState(1)
+// ── 通用转移弹窗（ERC20 / NFT 共用）─────────────────────────────────────
+// type: 'erc20' | 'nft'
+// 调用方提供: tokenContract, tokenId(nft), symbol(erc20), decimals(erc20), balance(erc20)
+function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, address, wc, pc, onClose, onDone }) {
+  const [toAddr, setToAddr] = useState('')
+  const [amount, setAmount] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
 
+  const addrOk = isAddress(toAddr) && toAddr.toLowerCase() !== address?.toLowerCase()
+
+  async function doTransfer() {
+    if (!addrOk) { setMsg('❌ 地址无效'); return }
+    if (!wc) { setMsg('❌ 请先连接钱包'); return }
+    setBusy(true)
+    try {
+      let h
+      if (type === 'erc20') {
+        if (!amount || isNaN(amount) || Number(amount) <= 0) { setMsg('❌ 请输入有效金额'); setBusy(false); return }
+        const amt = parseEther(amount)
+        if (amt > balance) { setMsg('❌ 余额不足'); setBusy(false); return }
+        setMsg('转账中...')
+        h = await wc.sendTransaction({ to: tokenContract, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [toAddr, amt] }) })
+      } else {
+        setMsg('转移 NFT...')
+        h = await wc.sendTransaction({ to: tokenContract, data: encodeFunctionData({ abi: NFT_ABI, functionName: 'safeTransferFrom', args: [address, toAddr, BigInt(tokenId)] }) })
+      }
+      await pc.waitForTransactionReceipt({ hash: h })
+      setMsg('✅ 转移成功！')
+      setTimeout(() => { onClose(); onDone?.() }, 1500)
+    } catch (e) {
+      setMsg('❌ ' + (e.shortMessage || e.message))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="as-sell-overlay" onClick={onClose}>
+      <div className="as-sell-modal" onClick={e => e.stopPropagation()} style={{ minWidth: 300 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10, color: '#c090ff' }}>📤 转移 {title}</div>
+        <div style={{ fontSize: '.75rem', color: '#7060a0', marginBottom: 6 }}>接收地址</div>
+        <input
+          className="as-sell-input"
+          placeholder="0x..."
+          value={toAddr}
+          onChange={e => setToAddr(e.target.value.trim())}
+          style={{ marginBottom: 8, fontSize: '.8rem', fontFamily: 'monospace' }}
+        />
+        {type === 'erc20' && (
+          <>
+            <div style={{ fontSize: '.75rem', color: '#7060a0', marginBottom: 4 }}>
+              金额 <span style={{ color: '#5040a0' }}>（余额 {fmtR(balance)} {symbol}）</span>
+            </div>
+            <input
+              className="as-sell-input"
+              type="number"
+              placeholder={`最大 ${fmtR(balance)}`}
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              min="0"
+              step="any"
+              style={{ marginBottom: 8 }}
+            />
+            <button
+              style={{ fontSize: '.7rem', color: '#5040a0', background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 8px', textDecoration: 'underline' }}
+              onClick={() => setAmount(fmtR(balance, 6))}
+            >全部转出</button>
+          </>
+        )}
+        {msg && <div style={{ fontSize: '.78rem', color: msg.startsWith('✅') ? '#52c462' : '#f06070', margin: '4px 0 8px' }}>{msg}</div>}
+        {!addrOk && toAddr.length > 5 && (
+          <div style={{ fontSize: '.72rem', color: '#f06070', marginBottom: 6 }}>地址格式不正确</div>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button className="as-btn-primary" style={{ padding: '.4rem .8rem', borderRadius: 8 }}
+            onClick={doTransfer} disabled={busy || !addrOk}>
+            {busy ? '处理中...' : '确认转移'}
+          </button>
+          <button className="as-btn-secondary" onClick={onClose}>取消</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── BlindBox Tab ──────────────────────────────────────────────────────────
+function BlindBoxTab({pc, address, wc}){
+  const [apoPx,setApoPx]=useState(null)
+  const [drlPx,setDrlPx]=useState(null)
+  const [buying,setBuying]=useState(null)
+  const [msg,setMsg]=useState('')
+  const [results,setResults]=useState([])
+  const [count,setCount]=useState(1)
   useEffect(()=>{
     if(!pc) return
     Promise.all([
@@ -75,104 +158,50 @@ function BlindBoxTab({pc, address, wc}){
       pc.readContract({address:CONTRACTS.blindbox,abi:BB_ABI,functionName:'drillBoxPrice'}).catch(()=>null),
     ]).then(([a,d])=>{ setApoPx(a); setDrlPx(d) })
   },[pc])
-
   async function buy(type){
     if(!wc||!address){ setMsg('请先连接钱包'); return }
-    const price = type==='apostle' ? apoPx : drlPx
-    if(!price) return
-    const total = price * BigInt(count)
+    const price=type==='apostle'?apoPx:drlPx; if(!price) return
+    const total=price*BigInt(count)
     setBuying(type); setMsg(`授权 ${fmtR(total)} RING...`)
     try{
-      // approve
-      const appData = encodeFunctionData({abi:ERC20_ABI,functionName:'approve',args:[CONTRACTS.blindbox, total]})
-      const h1 = await wc.sendTransaction({to:CONTRACTS.ring, data:appData})
+      const h1=await wc.sendTransaction({to:CONTRACTS.ring,data:encodeFunctionData({abi:ERC20_ABI,functionName:'approve',args:[CONTRACTS.blindbox,total]})})
       await pc.waitForTransactionReceipt({hash:h1})
       setMsg(`开启 ${count} 个${type==='apostle'?'使徒':'钻头'}盲盒...`)
-      // buy
-      const fn = count>1 ? (type==='apostle'?'buyApostleBoxBatch':'buyDrillBoxBatch') : (type==='apostle'?'buyApostleBox':'buyDrillBox')
-      const args = count>1 ? [BigInt(count)] : []
-      const buyData = encodeFunctionData({abi:BB_ABI, functionName:fn, args})
-      const h2 = await wc.sendTransaction({to:CONTRACTS.blindbox, data:buyData})
-      const receipt = await pc.waitForTransactionReceipt({hash:h2})
-      // 解析事件 — 从 logs 找 Transfer 拿 tokenId
-      const newIds = receipt.logs
-        .filter(l => l.address.toLowerCase() === (type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill).toLowerCase())
-        .map(l => { try{ return Number(BigInt(l.topics[3])) }catch{ return null } })
-        .filter(Boolean)
+      const fn=count>1?(type==='apostle'?'buyApostleBoxBatch':'buyDrillBoxBatch'):(type==='apostle'?'buyApostleBox':'buyDrillBox')
+      const h2=await wc.sendTransaction({to:CONTRACTS.blindbox,data:encodeFunctionData({abi:BB_ABI,functionName:fn,args:count>1?[BigInt(count)]:[]})})
+      const receipt=await pc.waitForTransactionReceipt({hash:h2})
+      const newIds=receipt.logs.filter(l=>l.address.toLowerCase()===(type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill).toLowerCase()).map(l=>{try{return Number(BigInt(l.topics[3]))}catch{return null}}).filter(Boolean)
       if(newIds.length>0){
-        // 读取 attrs
-        const attrRes = await pc.multicall({contracts:newIds.map(id=>({address:type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill,abi:type==='apostle'?APO_ABI:DRL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true})
-        const newResults = newIds.map((id,i)=>{
-          const at = attrRes[i]?.result
-          return type==='apostle'
-            ? {type,id,strength:at?Number(at[0]):30, elem:at?Number(at[1]):0}
-            : {type,id,tier:at?Number(at[0]):1, elem:at?Number(at[1]):0}
-        })
-        setResults(r=>[...newResults,...r].slice(0,20))
+        const attrRes=await pc.multicall({contracts:newIds.map(id=>({address:type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill,abi:type==='apostle'?APO_ABI:DRL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true})
+        setResults(r=>[...newIds.map((id,i)=>{const at=attrRes[i]?.result;return type==='apostle'?{type,id,strength:at?Number(at[0]):30,elem:at?Number(at[1]):0}:{type,id,tier:at?Number(at[0]):1,elem:at?Number(at[1]):0}}),...r].slice(0,20))
         setMsg(`🎉 获得 ${newIds.length} 个${type==='apostle'?'使徒':'钻头'}！`)
-      } else {
-        setMsg('✅ 购买成功！去使徒/钻头 Tab 查看')
-      }
+      } else { setMsg('✅ 购买成功！去使徒/钻头 Tab 查看') }
     }catch(e){ setMsg('❌ '+(e.shortMessage||e.message)) }
-    finally { setBuying(null) }
+    finally{ setBuying(null) }
   }
-
   const GH='https://raw.githubusercontent.com/evolutionlandorg/evo-frontend/main/public/images'
-
   return(
     <div>
-      {msg && <div className="as-msg">{msg}</div>}
-      {!address && <div className="as-empty">请先连接钱包</div>}
-
-      {/* 购买区域 */}
+      {msg&&<div className="as-msg">{msg}</div>}
+      {!address&&<div className="as-empty">请先连接钱包</div>}
       <div className="bb-asset-cards">
-        {/* 数量选择 */}
         <div className="bb-count-row">
           <span style={{color:'#9080b0',fontSize:'.8rem'}}>购买数量：</span>
-          {[1,5,10].map(n=>(
-            <button key={n} className={`bb-count-btn${count===n?' on':''}`} onClick={()=>setCount(n)}>{n}个</button>
-          ))}
+          {[1,5,10].map(n=><button key={n} className={`bb-count-btn${count===n?' on':''}`} onClick={()=>setCount(n)}>{n}个</button>)}
         </div>
-
-        {/* 使徒盲盒 */}
-        <div className="bb-asset-card apostle">
-          <div className="bb-asset-img-wrap">
-            <img src={`${GH}/apostle/egg.gif`} alt="apostle box" className="bb-asset-img"/>
-          </div>
-          <div className="bb-asset-info">
-            <div className="bb-asset-name">🧙 使徒盲盒</div>
-            <div className="bb-asset-desc">随机元素 · 力量1-100 · 当场铸造</div>
-            <div className="bb-asset-price">
-              {apoPx ? <><span style={{color:'#f0c040',fontWeight:800,fontSize:'1.1rem'}}>{fmtR(apoPx*BigInt(count))}</span> RING × {count}</> : '加载中...'}
+        {[['apostle','🧙 使徒盲盒','随机元素 · 力量1-100',apoPx,`${GH}/apostle/egg.gif`],['drill','⛏️ 钻头盲盒','随机亲和 · 1-5星',drlPx,drillImgUrl(2,3)]].map(([type,name,desc,px,img])=>(
+          <div key={type} className={`bb-asset-card ${type}`}>
+            <div className="bb-asset-img-wrap"><img src={img} alt={type} className="bb-asset-img"/></div>
+            <div className="bb-asset-info">
+              <div className="bb-asset-name">{name}</div>
+              <div className="bb-asset-desc">{desc}</div>
+              <div className="bb-asset-price">{px?<><span style={{color:'#f0c040',fontWeight:800,fontSize:'1.1rem'}}>{fmtR(px*BigInt(count))}</span> RING × {count}</>:'加载中...'}</div>
             </div>
+            <button className="as-btn-primary" style={{padding:'.45rem 1rem',borderRadius:10,fontSize:'.85rem'}} onClick={()=>buy(type)} disabled={!address||buying===type||!px}>{buying===type?'开启中...':'🎁 开盲盒'}</button>
           </div>
-          <button className="as-btn-primary" style={{padding:'.45rem 1rem',borderRadius:10,fontSize:'.85rem'}}
-            onClick={()=>buy('apostle')} disabled={!address||buying==='apostle'||!apoPx}>
-            {buying==='apostle'?'开启中...':'🎁 开盲盒'}
-          </button>
-        </div>
-
-        {/* 钻头盲盒 */}
-        <div className="bb-asset-card drill">
-          <div className="bb-asset-img-wrap">
-            <img src={drillImgUrl(2,3)} alt="drill box" className="bb-asset-img"/>
-          </div>
-          <div className="bb-asset-info">
-            <div className="bb-asset-name">⛏️ 钻头盲盒</div>
-            <div className="bb-asset-desc">随机亲和 · 1-5星 · 当场铸造</div>
-            <div className="bb-asset-price">
-              {drlPx ? <><span style={{color:'#f0c040',fontWeight:800,fontSize:'1.1rem'}}>{fmtR(drlPx*BigInt(count))}</span> RING × {count}</> : '加载中...'}
-            </div>
-          </div>
-          <button className="as-btn-primary" style={{padding:'.45rem 1rem',borderRadius:10,fontSize:'.85rem'}}
-            onClick={()=>buy('drill')} disabled={!address||buying==='drill'||!drlPx}>
-            {buying==='drill'?'开启中...':'🎁 开盲盒'}
-          </button>
-        </div>
+        ))}
       </div>
-
-      {/* 开启记录 */}
-      {results.length>0 && (
+      {results.length>0&&(
         <div style={{marginTop:'1rem'}}>
           <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:'.5rem',fontWeight:700}}>🎉 本次获得：</div>
           <div className="as-nft-grid">
@@ -183,27 +212,23 @@ function BlindBoxTab({pc, address, wc}){
                 </div>
                 <div className="as-nft-body">
                   <div className="as-nft-title">{r.type==='apostle'?'使徒':'钻头'} #{r.id}</div>
-                  <div style={{fontSize:'.7rem',color:ELEMS[r.elem].color}}>
-                    <ElemIcon i={r.elem} size={11}/>{ELEMS[r.elem].name}系
-                    {r.type==='apostle'?` · 力量${r.strength}`:` · ${'★'.repeat(r.tier)}`}
-                  </div>
+                  <div style={{fontSize:'.7rem',color:ELEMS[r.elem].color}}><ElemIcon i={r.elem} size={11}/>{ELEMS[r.elem].name}系{r.type==='apostle'?` · 力量${r.strength}`:` · ${'★'.repeat(r.tier)}`}</div>
                 </div>
               </div>
             ))}
           </div>
-          <div style={{fontSize:'.72rem',color:'#5040a0',marginTop:'.6rem',textAlign:'center'}}>
-            💡 切换到「🧙 使徒」或「⛏️ 钻头」Tab 查看全部
-          </div>
+          <div style={{fontSize:'.72rem',color:'#5040a0',marginTop:'.6rem',textAlign:'center'}}>💡 切换到「🧙 使徒」或「⛏️ 钻头」Tab 查看全部</div>
         </div>
       )}
     </div>
   )
 }
 
-// ── Token Tab ─────────────────────────────────────────────────────────────
-function TokenTab({pc,address}){
+// ── Token Tab（含转账功能）────────────────────────────────────────────────
+function TokenTab({pc, address, wc}){
   const [bals,setBals]=useState({})
   const [loading,setLoading]=useState(true)
+  const [transferModal,setTransferModal]=useState(null) // {sym,addr,color}
   const tokens=[
     {sym:'RING',addr:CONTRACTS.ring,icon:RING_SVG,color:'#c090ff'},
     {sym:'GOLD',addr:CONTRACTS.gold,icon:ELEM_SVGS[0],color:ELEMS[0].color},
@@ -212,58 +237,71 @@ function TokenTab({pc,address}){
     {sym:'FIRE',addr:CONTRACTS.fire,icon:ELEM_SVGS[3],color:ELEMS[3].color},
     {sym:'SIOO',addr:CONTRACTS.soil,icon:ELEM_SVGS[4],color:ELEMS[4].color},
   ]
-  useEffect(()=>{
+  const loadBals=useCallback(()=>{
     if(!address||!pc){setLoading(false);return}
     pc.multicall({contracts:tokens.map(t=>({address:t.addr,abi:ERC20_ABI,functionName:'balanceOf',args:[address]})),allowFailure:true})
       .then(res=>{const b={};tokens.forEach((t,i)=>{b[t.sym]=res[i]?.result??0n});setBals(b)}).finally(()=>setLoading(false))
   },[address,pc])
+  useEffect(()=>{loadBals()},[loadBals])
   if(!address)return <div className="as-empty">请先连接钱包</div>
   if(loading)return <div className="as-loading"><span className="as-spin"/>加载中...</div>
+  const cur=transferModal?tokens.find(t=>t.sym===transferModal):null
   return(
-    <div className="as-token-grid">
-      {tokens.map(t=>(
-        <div key={t.sym} className="as-token-card">
-          <img src={t.icon} alt={t.sym} style={{width:36,height:36}}/>
-          <div className="as-token-sym" style={{color:t.color}}>{t.sym}</div>
-          <div className="as-token-bal">{fmtR(bals[t.sym]||0n)}</div>
-        </div>
-      ))}
+    <div>
+      <div className="as-token-grid">
+        {tokens.map(t=>(
+          <div key={t.sym} className="as-token-card">
+            <img src={t.icon} alt={t.sym} style={{width:36,height:36}}/>
+            <div className="as-token-sym" style={{color:t.color}}>{t.sym}</div>
+            <div className="as-token-bal">{fmtR(bals[t.sym]||0n)}</div>
+            <button
+              className="as-btn-sm as-btn-secondary"
+              style={{marginTop:6,fontSize:'.7rem',padding:'3px 10px'}}
+              onClick={()=>setTransferModal(t.sym)}
+              disabled={!wc||(bals[t.sym]||0n)===0n}
+            >📤 转账</button>
+          </div>
+        ))}
+      </div>
+      {transferModal&&cur&&(
+        <TransferModal
+          type="erc20"
+          title={`${cur.sym} 代币`}
+          tokenContract={cur.addr}
+          symbol={cur.sym}
+          balance={bals[cur.sym]||0n}
+          address={address} wc={wc} pc={pc}
+          onClose={()=>setTransferModal(null)}
+          onDone={()=>{setTransferModal(null);loadBals()}}
+        />
+      )}
     </div>
   )
 }
 
-// ── Land Tab ──────────────────────────────────────────────────────────────
+// ── Land Tab（含转移）────────────────────────────────────────────────────
 function LandTab({pc,address,wc}){
   const [lands,setLands]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
   const [sellModal,setSellModal]=useState(null)
   const [sellPrice,setSellPrice]=useState('5')
+  const [transferId,setTransferId]=useState(null)
 
   const load=useCallback(async()=>{
     if(!address||!pc){setLoading(false);return}
     setLoading(true)
     try{
-      // 1. 优先从后端 API 获取所有铸造的土地 ID（快速）
       let allIds=[]
-      try{
-        const res=await fetch('/api/lands')
-        if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}
-      }catch{}
-      // 兜底：扫描固定范围
-      if(allIds.length===0){
-        for(let x=0;x<12;x++) for(let y=0;y<5;y++) allIds.push(x*100+y+1)
-      }
-      // 2. 批量查 ownerOf 找属于自己的土地
-      const BATCH=100
-      const myIds=[]
+      try{const res=await fetch('/api/lands');if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}}catch{}
+      if(!allIds.length){for(let x=0;x<12;x++) for(let y=0;y<5;y++) allIds.push(x*100+y+1)}
+      const BATCH=100,myIds=[]
       for(let i=0;i<allIds.length;i+=BATCH){
         const batch=allIds.slice(i,i+BATCH)
         const ownerRes=await pc.multicall({contracts:batch.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
         batch.forEach((id,j)=>{if(ownerRes[j]?.result?.toLowerCase()===address.toLowerCase())myIds.push(id)})
       }
-      if(myIds.length===0){setLands([]);setLoading(false);return}
-      // 3. 读资源属性、挖矿槽、两个拍卖合约
+      if(!myIds.length){setLands([]);setLoading(false);return}
       const NFT_AUC_ABI_MIN=[{type:'function',name:'getAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[{components:[{name:'nftContract',type:'address'},{name:'seller',type:'address'},{name:'startPrice',type:'uint128'},{name:'endPrice',type:'uint128'},{name:'duration',type:'uint64'},{name:'startedAt',type:'uint64'}],type:'tuple'}],stateMutability:'view'}]
       const [attrs,slots,oldAucs,newAucs]=await Promise.all([
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.land,abi:LAND_ABI,functionName:'resourceAttr',args:[BigInt(id)]})),allowFailure:true}),
@@ -272,11 +310,8 @@ function LandTab({pc,address,wc}){
         pc.multicall({contracts:myIds.map(id=>({address:NFT_AUCTION_ADDR,abi:NFT_AUC_ABI_MIN,functionName:'getAuction',args:[CONTRACTS.land,BigInt(id)]})),allowFailure:true}),
       ])
       setLands(myIds.map((id,i)=>{
-        const oldA=oldAucs[i]?.result
-        const newA=newAucs[i]?.result
-        const inOldAuc=oldA&&oldA[4]>0n
-        const inNewAuc=newA&&newA.startedAt>0n
-        return{id,resourceAttr:attrs[i]?.result??0n,slots:Number(slots[i]?.result??0n),inAuction:inOldAuc||inNewAuc,auctionType:inNewAuc?'new':inOldAuc?'old':'none'}
+        const oldA=oldAucs[i]?.result,newA=newAucs[i]?.result
+        return{id,resourceAttr:attrs[i]?.result??0n,slots:Number(slots[i]?.result??0n),inAuction:(oldA&&oldA[4]>0n)||(newA&&newA.startedAt>0n),auctionType:(newA&&newA.startedAt>0n)?'new':(oldA&&oldA[4]>0n)?'old':'none'}
       }))
     }catch(e){console.error(e)}
     setLoading(false)
@@ -284,36 +319,23 @@ function LandTab({pc,address,wc}){
   useEffect(()=>{load()},[load])
 
   async function handleSell(landId){
-    if(!wc){alert('请先连接钱包');return}
-    setMsg('授权中...')
+    if(!wc){alert('请先连接钱包');return}; setMsg('授权中...')
     try{
-      // 使用新的 NFTAuction 合约挂土地
-      const NFT_AUC_ABI_MIN=[
-        {type:'function',name:'createAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'},{name:'sp',type:'uint128'},{name:'ep',type:'uint128'},{name:'dur',type:'uint64'}],outputs:[],stateMutability:'nonpayable'},
-      ]
       const isAppr=await pc.readContract({address:CONTRACTS.land,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
-      if(!isAppr){
-        const h=await wc.sendTransaction({to:CONTRACTS.land,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})})
-        await pc.waitForTransactionReceipt({hash:h})
-      }
+      if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.land,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
       setMsg('挂单中...')
-      const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI_MIN,functionName:'createAuction',args:[CONTRACTS.land,BigInt(landId),parseEther(sellPrice),parseEther('1'),BigInt(3*24*3600)]})})
+      const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:[{type:'function',name:'createAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'},{name:'sp',type:'uint128'},{name:'ep',type:'uint128'},{name:'dur',type:'uint64'}],outputs:[],stateMutability:'nonpayable'}],functionName:'createAuction',args:[CONTRACTS.land,BigInt(landId),parseEther(sellPrice),parseEther('1'),BigInt(3*24*3600)]})})
       await pc.waitForTransactionReceipt({hash:h})
-      setMsg('✅ 挂单成功！去市场→土地查看');setSellModal(null);setTimeout(()=>{setMsg('');load()},3000)
+      setMsg('✅ 挂单成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},3000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
-  async function handleCancel(landId, auctionType){
+  async function handleCancel(landId,auctionType){
     if(!wc)return; setMsg('撤销中...')
     try{
-      let h
-      if(auctionType==='old'){
-        h=await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'cancelAuction',args:[BigInt(landId)]})})
-      } else {
-        const NFT_AUC_CANCEL=[{type:'function',name:'cancelAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[],stateMutability:'nonpayable'}]
-        h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_CANCEL,functionName:'cancelAuction',args:[CONTRACTS.land,BigInt(landId)]})})
-      }
-      await pc.waitForTransactionReceipt({hash:h})
-      setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
+      const h=auctionType==='old'
+        ?await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'cancelAuction',args:[BigInt(landId)]})})
+        :await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:[{type:'function',name:'cancelAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[],stateMutability:'nonpayable'}],functionName:'cancelAuction',args:[CONTRACTS.land,BigInt(landId)]})})
+      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
 
@@ -335,23 +357,27 @@ function LandTab({pc,address,wc}){
           </div>
         </div>
       )}
+      {transferId!=null&&(
+        <TransferModal type="nft" title={`土地 #${transferId}`} tokenContract={CONTRACTS.land} tokenId={transferId}
+          address={address} wc={wc} pc={pc} onClose={()=>setTransferId(null)} onDone={()=>{setTransferId(null);load()}}/>
+      )}
       <div className="as-nft-grid">
         {lands.map(l=>{
           const vals=decodeAttr(l.resourceAttr),maxV=Math.max(1,...vals)
-          const inAuction=l.inAuction
           return(
             <div key={l.id} className="as-nft-card">
               <div className="as-nft-img-wrap"><img src={landImgUrl(l.id)} alt="land" className="as-nft-img"/></div>
               <div className="as-nft-body">
                 <div className="as-nft-title">土地 #{l.id} <span style={{fontSize:'.6rem',color:'#4030a0'}}>({(l.id-1)%100},{Math.floor((l.id-1)/100)})</span></div>
                 {l.slots>0&&<div style={{fontSize:'.68rem',color:'#f0c040'}}>⛏️ {l.slots}槽挖矿中</div>}
-                {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
+                {l.inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
                 <div className="as-res-bars">{vals.map((v,i)=><div key={i} className="as-res-bar-row"><ElemIcon i={i} size={11}/><div className="as-res-bar-bg"><div style={{width:`${(v/maxV*100).toFixed(0)}%`,height:'100%',background:ELEMS[i].color,borderRadius:2}}/></div><span style={{color:ELEMS[i].color,fontSize:'.62rem',minWidth:22}}>{v}</span></div>)}</div>
                 <div className="as-nft-actions">
-                  {inAuction
+                  {l.inAuction
                     ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(l.id,l.auctionType)}>撤销挂单</button>
-                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖到市场</button>
+                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖</button>
                   }
+                  {!l.inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(l.id)}>📤 转移</button>}
                 </div>
               </div>
             </div>
@@ -363,52 +389,44 @@ function LandTab({pc,address,wc}){
   )
 }
 
-// ── Apostle Tab ───────────────────────────────────────────────────────────
+// ── Apostle Tab（含转移）─────────────────────────────────────────────────
 function ApostleTab({pc,address,wc}){
   const [apos,setApos]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
   const [sellModal,setSellModal]=useState(null)
   const [sellPrice,setSellPrice]=useState('3')
+  const [transferId,setTransferId]=useState(null)
 
   const load=useCallback(async()=>{
-    if(!address||!pc){setLoading(false);return}
-    setLoading(true)
+    if(!address||!pc){setLoading(false);return}; setLoading(true)
     try{
-      // ownerOf scan 1..nextId
       const nextId=await pc.readContract({address:CONTRACTS.apostle,abi:[{type:'function',name:'nextId',inputs:[],outputs:[{type:'uint256'}],stateMutability:'view'}],functionName:'nextId'})
-      const total=Number(nextId)-1
-      if(total<=0){setApos([]);setLoading(false);return}
-      const BATCH=50; const myIds=[]
+      const total=Number(nextId)-1; if(total<=0){setApos([]);setLoading(false);return}
+      const BATCH=50,myIds=[]
       for(let s=1;s<=total;s+=BATCH){
         const ids=Array.from({length:Math.min(BATCH,total-s+1)},(_,i)=>s+i)
         const res=await pc.multicall({contracts:ids.map(id=>({address:CONTRACTS.apostle,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
-        ids.forEach((id,i)=>{ if(res[i]?.result?.toLowerCase()===address.toLowerCase()) myIds.push(id) })
+        ids.forEach((id,i)=>{if(res[i]?.result?.toLowerCase()===address.toLowerCase())myIds.push(id)})
       }
-      if(myIds.length===0){setApos([]);setLoading(false);return}
+      if(!myIds.length){setApos([]);setLoading(false);return}
       const [attrRes,aucRes]=await Promise.all([
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.apostle,abi:APO_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true}),
         pc.multicall({contracts:myIds.map(id=>({address:NFT_AUCTION_ADDR,abi:NFT_AUC_ABI,functionName:'getAuction',args:[CONTRACTS.apostle,BigInt(id)]})),allowFailure:true}),
       ])
       setApos(myIds.map((id,i)=>({id,strength:attrRes[i]?.result?Number(attrRes[i].result[0]):30,elem:attrRes[i]?.result?Number(attrRes[i].result[1]):0,auction:aucRes[i]?.result})))
-    }catch(e){console.error(e)}
-    setLoading(false)
+    }catch(e){console.error(e)}; setLoading(false)
   },[address,pc])
   useEffect(()=>{load()},[load])
 
   async function handleSell(apoId){
     if(!wc)return; setMsg('授权中...')
     try{
-      // 使徒用 NFTAuction，需要 setOperator 或 setApprovalForAll
       const isAppr=await pc.readContract({address:CONTRACTS.apostle,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
-      if(!isAppr){
-        const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})})
-        await pc.waitForTransactionReceipt({hash:h})
-      }
+      if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
       setMsg('挂单中...')
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'createAuction',args:[CONTRACTS.apostle,BigInt(apoId),parseEther(sellPrice),parseEther('0.5'),BigInt(3*24*3600)]})})
-      await pc.waitForTransactionReceipt({hash:h})
-      setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleCancel(apoId){
@@ -436,6 +454,10 @@ function ApostleTab({pc,address,wc}){
           </div>
         </div>
       )}
+      {transferId!=null&&(
+        <TransferModal type="nft" title={`使徒 #${transferId}`} tokenContract={CONTRACTS.apostle} tokenId={transferId}
+          address={address} wc={wc} pc={pc} onClose={()=>setTransferId(null)} onDone={()=>{setTransferId(null);load()}}/>
+      )}
       <div className="as-nft-grid">
         {apos.map(a=>{
           const inAuction=a.auction&&Number(a.auction.startedAt??a.auction[4]??0)>0
@@ -453,6 +475,7 @@ function ApostleTab({pc,address,wc}){
                     ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(a.id)}>撤销</button>
                     :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(a.id)}>挂卖</button>
                   }
+                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(a.id)}>📤 转移</button>}
                 </div>
               </div>
             </div>
@@ -464,35 +487,33 @@ function ApostleTab({pc,address,wc}){
   )
 }
 
-// ── Drill Tab ─────────────────────────────────────────────────────────────
+// ── Drill Tab（含转移）───────────────────────────────────────────────────
 function DrillTab({pc,address,wc}){
   const [drills,setDrills]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
   const [sellModal,setSellModal]=useState(null)
   const [sellPrice,setSellPrice]=useState('3')
+  const [transferId,setTransferId]=useState(null)
 
   const load=useCallback(async()=>{
-    if(!address||!pc){setLoading(false);return}
-    setLoading(true)
+    if(!address||!pc){setLoading(false);return}; setLoading(true)
     try{
       const nextId=await pc.readContract({address:CONTRACTS.drill,abi:[{type:'function',name:'nextId',inputs:[],outputs:[{type:'uint256'}],stateMutability:'view'}],functionName:'nextId'})
-      const total=Number(nextId)-1
-      if(total<=0){setDrills([]);setLoading(false);return}
-      const BATCH=50; const myIds=[]
+      const total=Number(nextId)-1; if(total<=0){setDrills([]);setLoading(false);return}
+      const BATCH=50,myIds=[]
       for(let s=1;s<=total;s+=BATCH){
         const ids=Array.from({length:Math.min(BATCH,total-s+1)},(_,i)=>s+i)
         const res=await pc.multicall({contracts:ids.map(id=>({address:CONTRACTS.drill,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
-        ids.forEach((id,i)=>{ if(res[i]?.result?.toLowerCase()===address.toLowerCase()) myIds.push(id) })
+        ids.forEach((id,i)=>{if(res[i]?.result?.toLowerCase()===address.toLowerCase())myIds.push(id)})
       }
-      if(myIds.length===0){setDrills([]);setLoading(false);return}
+      if(!myIds.length){setDrills([]);setLoading(false);return}
       const [attrRes,aucRes]=await Promise.all([
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.drill,abi:DRL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true}),
         pc.multicall({contracts:myIds.map(id=>({address:NFT_AUCTION_ADDR,abi:NFT_AUC_ABI,functionName:'getAuction',args:[CONTRACTS.drill,BigInt(id)]})),allowFailure:true}),
       ])
       setDrills(myIds.map((id,i)=>({id,tier:attrRes[i]?.result?Number(attrRes[i].result[0]):1,elem:attrRes[i]?.result?Number(attrRes[i].result[1]):0,auction:aucRes[i]?.result})))
-    }catch(e){console.error(e)}
-    setLoading(false)
+    }catch(e){console.error(e)}; setLoading(false)
   },[address,pc])
   useEffect(()=>{load()},[load])
 
@@ -500,14 +521,10 @@ function DrillTab({pc,address,wc}){
     if(!wc)return; setMsg('授权中...')
     try{
       const isAppr=await pc.readContract({address:CONTRACTS.drill,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
-      if(!isAppr){
-        const h=await wc.sendTransaction({to:CONTRACTS.drill,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})})
-        await pc.waitForTransactionReceipt({hash:h})
-      }
+      if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.drill,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
       setMsg('挂单中...')
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'createAuction',args:[CONTRACTS.drill,BigInt(drlId),parseEther(sellPrice),parseEther('0.1'),BigInt(3*24*3600)]})})
-      await pc.waitForTransactionReceipt({hash:h})
-      setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleCancel(drlId){
@@ -535,6 +552,10 @@ function DrillTab({pc,address,wc}){
           </div>
         </div>
       )}
+      {transferId!=null&&(
+        <TransferModal type="nft" title={`钻头 #${transferId}`} tokenContract={CONTRACTS.drill} tokenId={transferId}
+          address={address} wc={wc} pc={pc} onClose={()=>setTransferId(null)} onDone={()=>{setTransferId(null);load()}}/>
+      )}
       <div className="as-nft-grid">
         {drills.map(d=>{
           const inAuction=d.auction&&Number(d.auction.startedAt??d.auction[4]??0)>0
@@ -552,6 +573,7 @@ function DrillTab({pc,address,wc}){
                     ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(d.id)}>撤销</button>
                     :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(d.id)}>挂卖</button>
                   }
+                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(d.id)}>📤 转移</button>}
                 </div>
               </div>
             </div>
@@ -570,23 +592,14 @@ function MiningTab({pc,address,wc}){
   const [msg,setMsg]=useState('')
 
   const load=useCallback(async()=>{
-    if(!address||!pc){setLoading(false);return}
-    setLoading(true)
+    if(!address||!pc){setLoading(false);return}; setLoading(true)
     try{
-      // 用后端API获取土地ID（快），再查slot
       let allIds=[]
-      try{
-        const res=await fetch('/api/lands')
-        if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}
-      }catch{}
+      try{const res=await fetch('/api/lands');if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}}catch{}
       if(!allIds.length){for(let x=0;x<=9;x++) for(let y=0;y<=4;y++) allIds.push(x*100+y+1)}
-      // 找属于我 或 在挖矿中的地块
       const ownerRes=await pc.multicall({contracts:allIds.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
       const miningAddr=CONTRACTS.mining.toLowerCase()
-      const relevantIds=allIds.filter((_,i)=>{
-        const o=ownerRes[i]?.result?.toLowerCase()
-        return o===address.toLowerCase()||o===miningAddr
-      })
+      const relevantIds=allIds.filter((_,i)=>{const o=ownerRes[i]?.result?.toLowerCase();return o===address.toLowerCase()||o===miningAddr})
       if(!relevantIds.length){setLands([]);setLoading(false);return}
       const slotCounts=await pc.multicall({contracts:relevantIds.map(id=>({address:CONTRACTS.mining,abi:MINING_ABI,functionName:'slotCount',args:[BigInt(id)]})),allowFailure:true})
       const activeLandIds=relevantIds.filter((_,i)=>Number(slotCounts[i]?.result??0n)>0)
@@ -601,8 +614,7 @@ function MiningTab({pc,address,wc}){
         landData.push({id,slotCount:cnt,rewards,slots:slotsData.filter(Boolean)})
       }
       setLands(landData)
-    }catch(e){console.error(e)}
-    setLoading(false)
+    }catch(e){console.error(e)}; setLoading(false)
   },[address,pc])
   useEffect(()=>{load()},[load])
 
@@ -613,7 +625,7 @@ function MiningTab({pc,address,wc}){
       await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 领取成功！');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
-  async function handleStop(landId, apostleId){
+  async function handleStop(landId,apostleId){
     if(!wc)return; setMsg('停止挖矿...')
     try{
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),BigInt(apostleId)]})})
@@ -623,7 +635,7 @@ function MiningTab({pc,address,wc}){
 
   if(!address)return <div className="as-empty">请先连接钱包</div>
   if(loading)return <div className="as-loading"><span className="as-spin"/>扫描挖矿中...</div>
-  if(lands.length===0)return <div className="as-empty">暂无挖矿中的地块</div>
+  if(!lands.length)return <div className="as-empty">暂无挖矿中的地块</div>
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
@@ -642,9 +654,7 @@ function MiningTab({pc,address,wc}){
               <div className="as-rewards-row">
                 <span style={{fontSize:'.68rem',color:'#5040a0',marginRight:6}}>待领：</span>
                 {ELEMS.map((el,i)=>(
-                  <span key={i} style={{fontSize:'.72rem',color:el.color,marginRight:8}}>
-                    <ElemIcon i={i} size={11}/>{fmtR(l.rewards[i]||0n,2)}
-                  </span>
+                  <span key={i} style={{fontSize:'.72rem',color:el.color,marginRight:8}}><ElemIcon i={i} size={11}/>{fmtR(l.rewards[i]||0n,2)}</span>
                 ))}
               </div>
             )}
@@ -655,7 +665,7 @@ function MiningTab({pc,address,wc}){
                   <span>#{slot.apostleId?.toString()}</span>
                   <img src={drillImgUrl(0,1)} style={{width:22,height:22}}/>
                   <span>#{slot.drillId?.toString()}</span>
-                  <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id, slot.apostleId)}>停</button>
+                  <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id,slot.apostleId)}>停</button>
                 </div>
               ))}
             </div>
@@ -670,10 +680,7 @@ function MiningTab({pc,address,wc}){
 export default function AssetsPage({initialTab='token'}){
   const pc=usePublicClient(),{address}=useAccount(),{data:wc}=useWalletClient()
   const [tab,setTab]=useState(initialTab)
-
-  // 响应外部跳转
-  useEffect(()=>{ if(initialTab) setTab(initialTab) },[initialTab])
-
+  useEffect(()=>{if(initialTab)setTab(initialTab)},[initialTab])
   return(
     <div className="as-root">
       <div className="as-header"><h1 className="as-title">💎 我的资产</h1></div>
@@ -681,7 +688,7 @@ export default function AssetsPage({initialTab='token'}){
         {TABS.map(t=><button key={t.k} className={`as-tab${tab===t.k?' on':''}`} onClick={()=>setTab(t.k)}>{t.label}</button>)}
       </div>
       <div className="as-content">
-        {tab==='token'   &&<TokenTab   pc={pc} address={address}/>}
+        {tab==='token'   &&<TokenTab   pc={pc} address={address} wc={wc}/>}
         {tab==='blindbox'&&<BlindBoxTab pc={pc} address={address} wc={wc}/>}
         {tab==='land'    &&<LandTab    pc={pc} address={address} wc={wc}/>}
         {tab==='apostle' &&<ApostleTab pc={pc} address={address} wc={wc}/>}
