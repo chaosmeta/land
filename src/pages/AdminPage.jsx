@@ -239,18 +239,18 @@ export default function AdminPage() {
       }
       log(`📊 总待领奖励: ${resourceTokens.map((t,i)=>`${t.sym}:${(Number(totals[i])/1e18).toFixed(0)}`).join(', ')}`)
 
-      // 给 Mining 合约充值 2x 安全边际
+      // 给 Mining 合约充值 2x 安全边际，最低 50000
       const SAFETY = 2n
+      const MIN_FUND = parseEther('50000')
       for(let i=0;i<5;i++){
-        const needed = totals[i] * SAFETY + parseEther('10000') // 底仓 10000
+        const needed = totals[i] * SAFETY + MIN_FUND
         const curBal = await pc.readContract({address:resourceTokens[i].addr,abi:ABI.erc20Bal,functionName:'balanceOf',args:[CONTRACTS.mining]}).catch(()=>0n)
         if(curBal >= needed){
-          log(`  ✅ ${resourceTokens[i].sym} 已有足够余额 (${(Number(curBal)/1e18).toFixed(0)})`, 'success')
+          log(`  ✅ ${resourceTokens[i].sym} 余额充足 (${(Number(curBal)/1e18).toFixed(0)})`, 'success')
           continue
         }
         const mintAmt = needed - curBal
-        log(`  🪙 Mint ${(Number(mintAmt)/1e18).toFixed(0)} ${resourceTokens[i].sym} 到 Mining 合约...`)
-        // mint 直接到 Mining 合约
+        log(`  🪙 Mint ${(Number(mintAmt)/1e18).toFixed(0)} ${resourceTokens[i].sym} → Mining 合约...`)
         await sendTx(wc, pc, resourceTokens[i].addr, ABI.erc20Mint, 'mint', [CONTRACTS.mining, mintAmt])
         const newBal = await pc.readContract({address:resourceTokens[i].addr,abi:ABI.erc20Bal,functionName:'balanceOf',args:[CONTRACTS.mining]}).catch(()=>0n)
         log(`  ✅ ${resourceTokens[i].sym} Mining余额: ${(Number(newBal)/1e18).toFixed(0)}`, 'success')

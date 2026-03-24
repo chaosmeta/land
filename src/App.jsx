@@ -22,15 +22,20 @@ const BASE_PAGES = [
   { id: 'apostle',  zh: '使徒',  en: 'Apostle',  icon: '🧙' },
   { id: 'blindbox', zh: '盲盒',  en: 'BlindBox', icon: '🎁' },
   { id: 'assets',   zh: '资产',  en: 'Assets',   icon: '💎' },
+  { id: 'swap',     zh: '兑换',  en: 'Swap',     icon: '🔄' },
 ]
-const ADMIN_PAGE = { id: 'admin', zh: '管理', en: 'Admin', icon: '🛠' }
+const ADMIN_PAGES = [
+  { id: 'farm',     zh: '农场',  en: 'Farm',     icon: '🌾' },
+  { id: 'referral', zh: '邀请',  en: 'Referral', icon: '🤝' },
+  { id: 'admin',    zh: '管理',  en: 'Admin',    icon: '🛠' },
+]
 
 function AppInner() {
   const [page, setPage] = useState('map')
   const [assetTab, setAssetTab] = useState('token')
   const { address } = useAccount()
   const isAdmin = address?.toLowerCase() === DEPLOYER?.toLowerCase()
-  const pages = isAdmin ? [...BASE_PAGES, ADMIN_PAGE] : BASE_PAGES
+  const pages = isAdmin ? [...BASE_PAGES, ...ADMIN_PAGES] : BASE_PAGES
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)

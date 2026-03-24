@@ -1,259 +1,195 @@
-import { useState, useEffect } from 'react'
-
-// ── wagmi shims ──────────────────────────────────────────────────────────────
-import { publicClient } from '../contexts/WalletContext.jsx'
-
-function useReadContract({ address, abi, functionName, args, enabled=true, watch=false }) {
-  const [data, setData] = useState(undefined)
-  const [isLoading, setIsLoading] = useState(false)
-  useEffect(() => {
-    if (!enabled || !address) return
-    setIsLoading(true)
-    publicClient.readContract({ address, abi, functionName, args }).then(setData).catch(()=>{}).finally(()=>setIsLoading(false))
-  }, [address, functionName, args?.map?.(a=>typeof a==="bigint"?a.toString():String(a)).join(","), enabled])
-  return { data, isLoading, refetch: ()=>{} }
-}
-
-function useWriteContract() {
-  const [isPending, setIsPending] = useState(false)
-  async function writeContractAsync(params) {
-    // pages using this should migrate to wc.writeContract
-    setIsPending(true)
-    try { return await Promise.reject(new Error('migrate to wc.writeContract')) }
-    finally { setIsPending(false) }
-  }
-  return { writeContractAsync, isPending }
-}
-
-function useWaitForTransactionReceipt({ hash } = {}) {
-  const [data, setData] = useState(undefined)
-  const [isLoading, setIsLoading] = useState(false)
-  useEffect(() => {
-    if (!hash) return
-    setIsLoading(true)
-    publicClient.waitForTransactionReceipt({ hash }).then(setData).catch(()=>{}).finally(()=>setIsLoading(false))
-  }, [hash])
-  return { data, isLoading }
-}
-// ────────────────────────────────────────────────────────────────────────────
-import { useAccount } from '../contexts/WalletContext.jsx'
-
-import { parseEther, formatEther, parseUnits } from 'viem'
+import { useState, useEffect, useCallback } from 'react'
+import { useAccount, useWalletClient, usePublicClient } from '../contexts/WalletContext.jsx'
+import { parseEther, formatEther, encodeFunctionData } from 'viem'
 import { CONTRACTS, PANCAKE_ROUTER, WBNB } from '../constants/contracts'
-import { ERC20_ABI } from '../constants/abi'
-import { useTokenBalances } from '../hooks/useTokenBalances'
 import './SwapPage.css'
 
-const PANCAKE_ROUTER_ABI = [
-  'function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] memory)',
-  'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory)',
-  'function swapExactETHForTokens(uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) payable returns (uint256[] memory)',
-  'function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory)',
+const ERC20_ABI = [
+  { type:'function', name:'approve', inputs:[{name:'s',type:'address'},{name:'a',type:'uint256'}], outputs:[{type:'bool'}], stateMutability:'nonpayable' },
+  { type:'function', name:'balanceOf', inputs:[{name:'a',type:'address'}], outputs:[{type:'uint256'}], stateMutability:'view' },
+  { type:'function', name:'allowance', inputs:[{name:'o',type:'address'},{name:'s',type:'address'}], outputs:[{type:'uint256'}], stateMutability:'view' },
+]
+
+const ROUTER_ABI = [
+  { type:'function', name:'getAmountsOut', inputs:[{name:'amountIn',type:'uint256'},{name:'path',type:'address[]'}], outputs:[{name:'amounts',type:'uint256[]'}], stateMutability:'view' },
+  { type:'function', name:'swapExactTokensForTokens', inputs:[{name:'amountIn',type:'uint256'},{name:'amountOutMin',type:'uint256'},{name:'path',type:'address[]'},{name:'to',type:'address'},{name:'deadline',type:'uint256'}], outputs:[{type:'uint256[]'}], stateMutability:'nonpayable' },
+  { type:'function', name:'swapExactETHForTokens', inputs:[{name:'amountOutMin',type:'uint256'},{name:'path',type:'address[]'},{name:'to',type:'address'},{name:'deadline',type:'uint256'}], outputs:[{type:'uint256[]'}], stateMutability:'payable' },
+  { type:'function', name:'swapExactTokensForETH', inputs:[{name:'amountIn',type:'uint256'},{name:'amountOutMin',type:'uint256'},{name:'path',type:'address[]'},{name:'to',type:'address'},{name:'deadline',type:'uint256'}], outputs:[{type:'uint256[]'}], stateMutability:'nonpayable' },
 ]
 
 const TOKENS = [
-  { symbol: 'BNB',  addr: null,             decimals: 18 },
-  { symbol: 'RING', addr: CONTRACTS.ring,   decimals: 18 },
-  { symbol: 'GOLD', addr: CONTRACTS.gold,   decimals: 18 },
-  { symbol: 'WOOD', addr: CONTRACTS.wood,   decimals: 18 },
-  { symbol: 'HHO',  addr: CONTRACTS.water,  decimals: 18 },
-  { symbol: 'FIRE', addr: CONTRACTS.fire,   decimals: 18 },
-  { symbol: 'SIOO', addr: CONTRACTS.soil,   decimals: 18 },
+  { symbol:'BNB',  addr:null,            decimals:18 },
+  { symbol:'RING', addr:CONTRACTS.ring,  decimals:18 },
+  { symbol:'GOLD', addr:CONTRACTS.gold,  decimals:18 },
+  { symbol:'WOOD', addr:CONTRACTS.wood,  decimals:18 },
+  { symbol:'HHO',  addr:CONTRACTS.water, decimals:18 },
+  { symbol:'FIRE', addr:CONTRACTS.fire,  decimals:18 },
+  { symbol:'SIOO', addr:CONTRACTS.soil,  decimals:18 },
 ]
 
-const SLIPPAGE_OPTIONS = [0.1, 0.5, 1.0]
+const SLIPPAGE_OPTIONS = [0.5, 1.0, 2.0]
 
-function buildPath(fromToken, toToken) {
-  const from = fromToken.addr ?? WBNB
-  const to   = toToken.addr ?? WBNB
-  if (from === WBNB || to === WBNB) return [from, to]
-  return [from, WBNB, to]
+function buildPath(from, to) {
+  const f = from.addr ?? WBNB
+  const t = to.addr ?? WBNB
+  if (f === WBNB || t === WBNB) return [f, t]
+  return [f, WBNB, t]
 }
 
 export default function SwapPage() {
   const { address } = useAccount()
-  const [fromIdx, setFromIdx] = useState(0)  // BNB
-  const [toIdx,   setToIdx]   = useState(1)  // RING
+  const { data: wc } = useWalletClient()
+  const pc = usePublicClient()
+
+  const [fromIdx, setFromIdx] = useState(0)
+  const [toIdx,   setToIdx]   = useState(1)
   const [amountIn,  setAmountIn]  = useState('')
   const [amountOut, setAmountOut] = useState('')
-  const [slippage,  setSlippage]  = useState(0.5)
+  const [slippage,  setSlippage]  = useState(1.0)
   const [customSlip, setCustomSlip] = useState('')
-  const [loading,  setLoading]  = useState(false)
-  const [txHash,   setTxHash]   = useState(null)
-
-  const { balances } = useTokenBalances()
-  const { writeContractAsync } = useWriteContract()
-  const { isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [balances, setBalances] = useState({})
 
   const fromToken = TOKENS[fromIdx]
   const toToken   = TOKENS[toIdx]
 
-  // Get quote from PancakeSwap
-  const path = buildPath(fromToken, toToken)
-  const amountInParsed = amountIn ? parseEther(amountIn) : 0n
-
-  const { data: amountsOut } = useReadContract({
-    address: PANCAKE_ROUTER,
-    abi: PANCAKE_ROUTER_ABI,
-    functionName: 'getAmountsOut',
-    args: [amountInParsed > 0n ? amountInParsed : 1n, path],
-    query: { enabled: amountInParsed > 0n, refetchInterval: 5000 },
-  })
-
-  useEffect(() => {
-    if (amountsOut && amountsOut.length > 0) {
-      setAmountOut(parseFloat(formatEther(amountsOut[amountsOut.length - 1])).toFixed(6))
+  // 加载余额
+  const loadBalances = useCallback(async () => {
+    if (!address || !pc) return
+    const bals = {}
+    // BNB 余额
+    const bnb = await pc.getBalance({ address }).catch(() => 0n)
+    bals['BNB'] = bnb
+    // ERC20 余额
+    for (const t of TOKENS) {
+      if (!t.addr) continue
+      const b = await pc.readContract({ address: t.addr, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] }).catch(() => 0n)
+      bals[t.symbol] = b
     }
-  }, [amountsOut])
+    setBalances(bals)
+  }, [address, pc])
 
-  function swap(i, j) {
-    setFromIdx(j); setToIdx(i)
-    setAmountIn(''); setAmountOut('')
-  }
+  useEffect(() => { loadBalances() }, [loadBalances])
+
+  // 报价
+  useEffect(() => {
+    if (!amountIn || !pc || Number(amountIn) <= 0) { setAmountOut(''); return }
+    const path = buildPath(fromToken, toToken)
+    let cancelled = false
+    pc.readContract({
+      address: PANCAKE_ROUTER, abi: ROUTER_ABI, functionName: 'getAmountsOut',
+      args: [parseEther(amountIn), path],
+    }).then(amounts => {
+      if (!cancelled) setAmountOut(Number(formatEther(amounts[amounts.length - 1])).toFixed(6))
+    }).catch(() => { if (!cancelled) setAmountOut('—') })
+    return () => { cancelled = true }
+  }, [amountIn, fromIdx, toIdx, pc])
 
   async function handleSwap() {
-    if (!address || !amountIn) return alert('请先连接钱包并输入金额')
-    setLoading(true)
+    if (!address) { alert('请先连接钱包'); return }
+    if (!wc) { alert('钱包未连接'); return }
+    if (!amountIn || Number(amountIn) <= 0) { alert('请输入金额'); return }
+    if (fromIdx === toIdx) { alert('请选择不同的代币'); return }
+    setLoading(true); setMsg('准备兑换...')
     try {
-      const amIn  = parseEther(amountIn)
-      const amOut = amountsOut?.[amountsOut.length - 1] ?? 0n
-      const slip  = BigInt(Math.floor((100 - (customSlip || slippage)) * 100))
-      const amMin = amOut * slip / 10000n
+      const amIn = parseEther(amountIn)
+      const path = buildPath(fromToken, toToken)
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
+      const slip = Number(customSlip) || slippage
+      // 获取最新报价计算最小输出
+      const amounts = await pc.readContract({ address: PANCAKE_ROUTER, abi: ROUTER_ABI, functionName: 'getAmountsOut', args: [amIn, path] })
+      const amOut = amounts[amounts.length - 1]
+      const amMin = amOut * BigInt(Math.floor((100 - slip) * 100)) / 10000n
 
       if (fromToken.addr) {
-        // Token → approve first
-        await writeContractAsync({
-          address: fromToken.addr,
-          abi: ERC20_ABI,
-          functionName: 'approve',
-          args: [PANCAKE_ROUTER, amIn],
-        })
+        // 检查并设置授权
+        const allowance = await pc.readContract({ address: fromToken.addr, abi: ERC20_ABI, functionName: 'allowance', args: [address, PANCAKE_ROUTER] }).catch(() => 0n)
+        if (allowance < amIn) {
+          setMsg('授权 ' + fromToken.symbol + '...')
+          const h = await wc.sendTransaction({ to: fromToken.addr, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [PANCAKE_ROUTER, amIn * 10n] }) })
+          await pc.waitForTransactionReceipt({ hash: h })
+        }
       }
 
-      let tx
+      setMsg('兑换中...')
+      let h
       if (!fromToken.addr) {
         // BNB → Token
-        tx = await writeContractAsync({
-          address: PANCAKE_ROUTER,
-          abi: PANCAKE_ROUTER_ABI,
-          functionName: 'swapExactETHForTokens',
-          args: [amMin, path, address, deadline],
-          value: amIn,
-        })
+        h = await wc.sendTransaction({ to: PANCAKE_ROUTER, value: amIn, data: encodeFunctionData({ abi: ROUTER_ABI, functionName: 'swapExactETHForTokens', args: [amMin, path, address, deadline] }) })
       } else if (!toToken.addr) {
         // Token → BNB
-        tx = await writeContractAsync({
-          address: PANCAKE_ROUTER,
-          abi: PANCAKE_ROUTER_ABI,
-          functionName: 'swapExactTokensForETH',
-          args: [amIn, amMin, path, address, deadline],
-        })
+        h = await wc.sendTransaction({ to: PANCAKE_ROUTER, data: encodeFunctionData({ abi: ROUTER_ABI, functionName: 'swapExactTokensForETH', args: [amIn, amMin, path, address, deadline] }) })
       } else {
         // Token → Token
-        tx = await writeContractAsync({
-          address: PANCAKE_ROUTER,
-          abi: PANCAKE_ROUTER_ABI,
-          functionName: 'swapExactTokensForTokens',
-          args: [amIn, amMin, path, address, deadline],
-        })
+        h = await wc.sendTransaction({ to: PANCAKE_ROUTER, data: encodeFunctionData({ abi: ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [amIn, amMin, path, address, deadline] }) })
       }
-      setTxHash(tx)
+      await pc.waitForTransactionReceipt({ hash: h })
+      setMsg('✅ 兑换成功！')
+      setAmountIn(''); setAmountOut('')
+      setTimeout(() => { setMsg(''); loadBalances() }, 2000)
     } catch (e) {
-      alert(e.shortMessage || e.message)
-    } finally {
-      setLoading(false)
-    }
+      const m = e.shortMessage || e.message || ''
+      if (m.includes('INSUFFICIENT_LIQUIDITY') || m.includes('insufficient')) {
+        setMsg('❌ 流动性不足：该交易对在 PancakeSwap 上暂无流动性')
+      } else {
+        setMsg('❌ ' + m.slice(0, 100))
+      }
+    } finally { setLoading(false) }
   }
 
-  const fromBal = fromToken.symbol === 'BNB' ? '—' : (balances[fromToken.symbol]?.formatted ?? '0')
-  const toBal   = toToken.symbol   === 'BNB' ? '—' : (balances[toToken.symbol]?.formatted   ?? '0')
+  const fmtBal = sym => {
+    const b = balances[sym]
+    if (b == null) return '—'
+    return Number(formatEther(b)).toFixed(4)
+  }
 
   return (
     <div className="swap-page">
       <div className="swap-card">
         <div className="swap-title">🔄 代币兑换</div>
-
+        <div className="swap-notice" style={{fontSize:'.72rem',color:'#f0a040',background:'#1a1000',border:'1px solid #4a3000',borderRadius:8,padding:'8px 12px',marginBottom:12}}>
+          ⚠️ 基于 PancakeSwap Testnet 路由。RING与各资源token的交易对需先在PancakeSwap添加流动性才能兑换。
+        </div>
         {/* From */}
         <div className="swap-token-box">
           <div className="swap-label">卖出</div>
           <div className="swap-row">
-            <select className="token-select" value={fromIdx} onChange={e => setFromIdx(+e.target.value)}>
-              {TOKENS.map((t, i) => i !== toIdx && <option key={t.symbol} value={i}>{t.symbol}</option>)}
+            <select className="token-select" value={fromIdx} onChange={e => { setFromIdx(+e.target.value); setAmountIn(''); setAmountOut('') }}>
+              {TOKENS.map((t,i) => <option key={t.symbol} value={i} disabled={i===toIdx}>{t.symbol}</option>)}
             </select>
-            <input
-              type="number"
-              className="amount-input"
-              placeholder="0.0"
-              value={amountIn}
-              onChange={e => setAmountIn(e.target.value)}
-            />
+            <input type="number" className="amount-input" placeholder="0.0" value={amountIn} onChange={e => setAmountIn(e.target.value)}/>
           </div>
-          <div className="balance-row">余额: {fromBal}</div>
+          <div className="balance-row">余额: {fmtBal(fromToken.symbol)}</div>
         </div>
-
-        {/* Swap Arrow */}
-        <button className="swap-arrow" onClick={() => swap(fromIdx, toIdx)}>⇅</button>
-
+        {/* Arrow */}
+        <button className="swap-arrow" onClick={() => { setFromIdx(toIdx); setToIdx(fromIdx); setAmountIn(''); setAmountOut('') }}>⇅</button>
         {/* To */}
         <div className="swap-token-box">
           <div className="swap-label">买入</div>
           <div className="swap-row">
-            <select className="token-select" value={toIdx} onChange={e => setToIdx(+e.target.value)}>
-              {TOKENS.map((t, i) => i !== fromIdx && <option key={t.symbol} value={i}>{t.symbol}</option>)}
+            <select className="token-select" value={toIdx} onChange={e => { setToIdx(+e.target.value); setAmountOut('') }}>
+              {TOKENS.map((t,i) => <option key={t.symbol} value={i} disabled={i===fromIdx}>{t.symbol}</option>)}
             </select>
-            <input
-              type="number"
-              className="amount-input"
-              placeholder="0.0"
-              readOnly
-              value={amountOut}
-            />
+            <input type="number" className="amount-input" placeholder="0.0" readOnly value={amountOut}/>
           </div>
-          <div className="balance-row">余额: {toBal}</div>
+          <div className="balance-row">余额: {fmtBal(toToken.symbol)}</div>
         </div>
-
         {/* Slippage */}
         <div className="slippage-row">
-          <span>滑点容忍:</span>
+          <span>滑点:</span>
           {SLIPPAGE_OPTIONS.map(s => (
-            <button
-              key={s}
-              className={`slip-btn ${slippage === s && !customSlip ? 'active' : ''}`}
-              onClick={() => { setSlippage(s); setCustomSlip('') }}
-            >{s}%</button>
+            <button key={s} className={`slip-btn${slippage===s&&!customSlip?' active':''}`} onClick={() => { setSlippage(s); setCustomSlip('') }}>{s}%</button>
           ))}
-          <input
-            className="slip-custom"
-            placeholder="自定义"
-            value={customSlip}
-            onChange={e => setCustomSlip(e.target.value)}
-          />
+          <input className="slip-custom" placeholder="自定义%" value={customSlip} onChange={e => setCustomSlip(e.target.value)}/>
         </div>
-
-        {/* Swap Button */}
-        <button
-          className="swap-btn"
-          onClick={handleSwap}
-          disabled={loading || !amountIn || isSuccess}
-        >
-          {isSuccess ? '✅ 兑换成功' : loading ? '处理中…' : '兑换'}
+        {msg && <div style={{fontSize:'.78rem',color:msg.startsWith('✅')?'#52c462':msg.startsWith('❌')?'#f06070':'#9080b0',margin:'8px 0',padding:'6px 10px',background:'#0d0a18',borderRadius:8}}>{msg}</div>}
+        <button className="swap-btn" onClick={handleSwap} disabled={loading||!amountIn||!address}>
+          {!address ? '请先连接钱包' : loading ? '处理中…' : '兑换'}
         </button>
-
-        {txHash && (
-          <a
-            className="tx-link"
-            href={`https://testnet.bscscan.com/tx/${txHash}`}
-            target="_blank" rel="noreferrer"
-          >
-            查看交易 ↗
-          </a>
-        )}
-
-        {/* Router info */}
-        <div className="router-info">
-          路由: PancakeSwap Testnet ·
-          <a href={`https://testnet.bscscan.com/address/${PANCAKE_ROUTER}`} target="_blank" rel="noreferrer">
+        <div className="router-info" style={{fontSize:'.65rem',color:'#3a2860',marginTop:8,textAlign:'center'}}>
+          路由: PancakeSwap Testnet ·&nbsp;
+          <a href={`https://testnet.bscscan.com/address/${PANCAKE_ROUTER}`} target="_blank" rel="noreferrer" style={{color:'#5040a0'}}>
             {PANCAKE_ROUTER.slice(0,8)}…
           </a>
         </div>
