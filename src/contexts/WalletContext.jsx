@@ -1,5 +1,5 @@
 // src/contexts/WalletContext.jsx
-// 单一钱包状态管理，完全基于 window.ethereum
+// 完全基于 window.ethereum，支持 MetaMask / OKX / TokenPocket
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { createWalletClient, custom, createPublicClient, http } from 'viem'
 
@@ -13,13 +13,37 @@ export const bscTestnet = {
   testnet: true,
 }
 
-const BSC_HEX = '0x61'
+const BSC_CHAIN_PARAMS = {
+  chainId: '0x61',
+  chainName: 'BSC Testnet',
+  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+  rpcUrls: ['https://bsc-testnet-rpc.publicnode.com'],
+  blockExplorerUrls: ['https://testnet.bscscan.com'],
+}
 
-// 全局单例 publicClient（读链用）
+// 全局读链客户端
 export const publicClient = createPublicClient({
   chain: bscTestnet,
   transport: http('https://bsc-testnet-rpc.publicnode.com'),
 })
+
+// 检测当前环境有哪些钱包
+function detectWallets() {
+  const wallets = []
+  const eth = window.ethereum
+  if (!eth) return wallets
+  // 多钱包环境（EIP-6963 / window.ethereum.providers）
+  const providers = eth.providers || (eth._isMM || eth.isMetaMask ? [eth] : [eth])
+  const list = Array.isArray(providers) ? providers : [eth]
+  list.forEach(p => {
+    if (p.isMetaMask && !p.isOKExWallet) wallets.push({ name: 'MetaMask', icon: '🦊', provider: p })
+    else if (p.isOKExWallet || p.isOKX)  wallets.push({ name: 'OKX',      icon: '⭕', provider: p })
+    else if (p.isTokenPocket)             wallets.push({ name: 'TP钱包',   icon: '🎒', provider: p })
+    else if (!wallets.length)             wallets.push({ name: '钱包',     icon: '👛', provider: p })
+  })
+  // 去重
+  return wallets.filter((w, i, arr) => arr.findIndex(x => x.provider === w.provider) === i)
+}
 
 const WalletCtx = createContext(null)
 
@@ -27,77 +51,125 @@ export function WalletProvider({ children }) {
   const [address, setAddress]   = useState('')
   const [chainId, setChainId]   = useState(0)
   const [pending, setPending]   = useState(false)
-  const wcRef = useRef(null)
+  const [wallets, setWallets]   = useState([])
+  const [showPicker, setShowPicker] = useState(false)
+  const providerRef = useRef(null)
+  const wcRef       = useRef(null)
 
-  function buildWalletClient() {
-    if (typeof window === 'undefined' || !window.ethereum) return null
-    wcRef.current = createWalletClient({ chain: bscTestnet, transport: custom(window.ethereum) })
+  function buildWalletClient(provider) {
+    if (!provider) return null
+    providerRef.current = provider
+    wcRef.current = createWalletClient({ chain: bscTestnet, transport: custom(provider) })
     return wcRef.current
+  }
+
+  async function switchToBSC(provider) {
+    try {
+      await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x61' }] })
+    } catch (e) {
+      if (e.code === 4902 || e.code === -32603) {
+        await provider.request({ method: 'wallet_addEthereumChain', params: [BSC_CHAIN_PARAMS] })
+      }
+    }
   }
 
   // 页面加载时恢复已连接状态
   useEffect(() => {
     const eth = window.ethereum
     if (!eth) return
-    eth.request({ method: 'eth_accounts' }).then(a => {
-      if (a[0]) { setAddress(a[0]); buildWalletClient() }
+    eth.request({ method: 'eth_accounts' }).then(accs => {
+      if (accs[0]) { setAddress(accs[0]); buildWalletClient(eth) }
     }).catch(() => {})
     eth.request({ method: 'eth_chainId' }).then(id => setChainId(parseInt(id, 16))).catch(() => {})
-    const onAcc   = a  => { setAddress(a[0] || ''); if (a[0]) buildWalletClient() }
-    const onChain = id => setChainId(parseInt(id, 16))
+    const onAcc   = accs => { setAddress(accs[0] || ''); if (accs[0]) buildWalletClient(eth) }
+    const onChain = id   => setChainId(parseInt(id, 16))
     eth.on('accountsChanged', onAcc)
     eth.on('chainChanged', onChain)
-    return () => { eth.removeListener('accountsChanged', onAcc); eth.removeListener('chainChanged', onChain) }
+    return () => { eth.removeListener?.('accountsChanged', onAcc); eth.removeListener?.('chainChanged', onChain) }
   }, [])
 
-  const connectWallet = useCallback(async () => {
-    const eth = window.ethereum
-    if (!eth) { alert('请先安装 MetaMask'); return }
+  // 用指定 provider 连接
+  async function connectWith(provider) {
     setPending(true)
+    setShowPicker(false)
     try {
-      const accs = await eth.request({ method: 'eth_requestAccounts' })
-      if (!accs[0]) throw new Error('No accounts returned')
+      const accs = await provider.request({ method: 'eth_requestAccounts' })
+      if (!accs?.[0]) throw new Error('No accounts')
       setAddress(accs[0])
-      buildWalletClient()
-      // 切换或添加 BSC 测试网
-      try {
-        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_HEX }] })
-      } catch (e) {
-        if (e.code === 4902 || e.code === -32603) {
-          await eth.request({ method: 'wallet_addEthereumChain', params: [{
-            chainId: BSC_HEX, chainName: 'BSC Testnet',
-            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-            rpcUrls: ['https://bsc-testnet-rpc.publicnode.com'],
-            blockExplorerUrls: ['https://testnet.bscscan.com'],
-          }]})
-        }
-      }
-      const id = await eth.request({ method: 'eth_chainId' })
+      buildWalletClient(provider)
+      await switchToBSC(provider)
+      const id = await provider.request({ method: 'eth_chainId' })
       setChainId(parseInt(id, 16))
     } catch (e) {
-      if (e.code !== 4001) console.error('connect error:', e) // 忽略用户拒绝
+      if (e.code !== 4001) console.error('connect error:', e)
     } finally { setPending(false) }
+  }
+
+  const connectWallet = useCallback(() => {
+    if (typeof window === 'undefined' || !window.ethereum) {
+      alert('请安装 MetaMask、OKX 或 TokenPocket 钱包')
+      return
+    }
+    const detected = detectWallets()
+    setWallets(detected)
+    if (detected.length === 1) {
+      connectWith(detected[0].provider)
+    } else if (detected.length > 1) {
+      setShowPicker(true)
+    } else {
+      connectWith(window.ethereum)
+    }
   }, [])
 
   const disconnectWallet = useCallback(() => {
-    setAddress(''); wcRef.current = null
+    setAddress(''); wcRef.current = null; providerRef.current = null
   }, [])
 
   const value = {
-    address,
-    chainId,
+    address, chainId,
     isConnected:    !!address,
     isCorrectChain: chainId === 97,
     isPending:      pending,
+    showPicker,
+    wallets,
     connectWallet,
+    connectWith,
     disconnectWallet,
-    // 供各页面使用
-    walletClient:  wcRef.current,
-    getWalletClient: () => wcRef.current || buildWalletClient(),
+    setShowPicker,
+    getWalletClient: () => wcRef.current || (providerRef.current ? buildWalletClient(providerRef.current) : null),
     publicClient,
   }
 
-  return <WalletCtx.Provider value={value}>{children}</WalletCtx.Provider>
+  return (
+    <WalletCtx.Provider value={value}>
+      {children}
+      {showPicker && <WalletPicker wallets={wallets} onSelect={connectWith} onClose={() => setShowPicker(false)} />}
+    </WalletCtx.Provider>
+  )
+}
+
+// 钱包选择弹窗
+function WalletPicker({ wallets, onSelect, onClose }) {
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#1a1428',border:'1px solid #3a2a5a',borderRadius:16,padding:24,minWidth:260,boxShadow:'0 8px 32px rgba(0,0,0,.6)'}}>
+        <div style={{fontFamily:'monospace',fontSize:'.85rem',color:'#c090ff',marginBottom:16,textAlign:'center',letterSpacing:'.1em'}}>选择钱包</div>
+        {wallets.map((w, i) => (
+          <button key={i} onClick={() => onSelect(w.provider)} style={{
+            display:'flex',alignItems:'center',gap:12,width:'100%',padding:'12px 16px',
+            background:'#0d0a1a',border:'1px solid #2a1a4a',borderRadius:10,cursor:'pointer',
+            color:'#e0d0ff',fontFamily:'monospace',fontSize:'.9rem',marginBottom:8,transition:'all .15s',
+          }}
+          onMouseEnter={e=>e.target.style.borderColor='#7a40cc'}
+          onMouseLeave={e=>e.target.style.borderColor='#2a1a4a'}>
+            <span style={{fontSize:'1.4rem'}}>{w.icon}</span>
+            <span>{w.name}</span>
+          </button>
+        ))}
+        <button onClick={onClose} style={{width:'100%',padding:'8px',background:'none',border:'none',color:'#5040a0',cursor:'pointer',fontFamily:'monospace',fontSize:'.75rem',marginTop:4}}>取消</button>
+      </div>
+    </div>
+  )
 }
 
 export function useWallet() {
@@ -106,18 +178,15 @@ export function useWallet() {
   return ctx
 }
 
-// ── 兼容层 hooks（替换 wagmi hooks，让现有页面无需改动）─────────────────
-
+// ── 兼容层（替换 wagmi hooks）────────────────────────────────────────────
 export function useAccount() {
   const { address, isConnected, chainId } = useWallet()
   return { address, isConnected, chainId, chain: isConnected ? bscTestnet : undefined }
 }
 
 export function useWalletClient() {
-  const { getWalletClient, isConnected, address } = useWallet()
-  // 每次 address 变化时重建 walletClient
-  const wc = isConnected ? getWalletClient() : null
-  return { data: wc }
+  const { getWalletClient, isConnected } = useWallet()
+  return { data: isConnected ? getWalletClient() : null }
 }
 
 export function usePublicClient() {

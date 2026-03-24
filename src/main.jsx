@@ -1,13 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { WagmiProvider } from 'wagmi'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { wagmiConfig } from './config/wagmi.js'
 import { WalletProvider } from './contexts/WalletContext.jsx'
 import App from './App.jsx'
 import './index.css'
-
-const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
 class EB extends React.Component {
   constructor(p) { super(p); this.state = { err: null } }
@@ -25,12 +20,8 @@ class EB extends React.Component {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <EB>
-    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
-      <QueryClientProvider client={qc}>
-        <WalletProvider>
-          <EB><App /></EB>
-        </WalletProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <WalletProvider>
+      <EB><App /></EB>
+    </WalletProvider>
   </EB>
 )
