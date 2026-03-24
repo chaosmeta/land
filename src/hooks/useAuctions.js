@@ -1,5 +1,20 @@
 
 import { CONTRACTS } from '../constants/contracts'
+
+// ── wagmi shims ──────────────────────────────────────────────────────────────
+import { publicClient } from '../contexts/WalletContext.jsx'
+
+function useReadContracts({ contracts=[], enabled=true }) {
+  const [data, setData] = React.useState([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!enabled || !contracts.length) return
+    setIsLoading(true)
+    publicClient.multicall({ contracts, allowFailure:true }).then(r=>setData(r.map(x=>({result:x.result,status:x.status})))).catch(()=>setData([])).finally(()=>setIsLoading(false))
+  }, [JSON.stringify(contracts), enabled])
+  return { data, isLoading }
+}
+// ────────────────────────────────────────────────────────────────────────────
 import { AUCTION_ABI } from '../constants/abi'
 import { formatEther } from 'viem'
 

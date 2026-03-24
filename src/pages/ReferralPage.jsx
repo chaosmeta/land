@@ -1,4 +1,41 @@
 import { useState } from 'react'
+
+// ── wagmi shims ──────────────────────────────────────────────────────────────
+import { publicClient } from '../contexts/WalletContext.jsx'
+
+function useReadContracts({ contracts=[], enabled=true }) {
+  const [data, setData] = React.useState([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!enabled || !contracts.length) return
+    setIsLoading(true)
+    publicClient.multicall({ contracts, allowFailure:true }).then(r=>setData(r.map(x=>({result:x.result,status:x.status})))).catch(()=>setData([])).finally(()=>setIsLoading(false))
+  }, [JSON.stringify(contracts), enabled])
+  return { data, isLoading }
+}
+
+function useWriteContract() {
+  const [isPending, setIsPending] = React.useState(false)
+  async function writeContractAsync(params) {
+    // pages using this should migrate to wc.writeContract
+    setIsPending(true)
+    try { return await Promise.reject(new Error('migrate to wc.writeContract')) }
+    finally { setIsPending(false) }
+  }
+  return { writeContractAsync, isPending }
+}
+
+function useWaitForTransactionReceipt({ hash } = {}) {
+  const [data, setData] = React.useState(undefined)
+  const [isLoading, setIsLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!hash) return
+    setIsLoading(true)
+    publicClient.waitForTransactionReceipt({ hash }).then(setData).catch(()=>{}).finally(()=>setIsLoading(false))
+  }, [hash])
+  return { data, isLoading }
+}
+// ────────────────────────────────────────────────────────────────────────────
 import { useAccount } from '../contexts/WalletContext.jsx'
 
 import { CONTRACTS, RESOURCE_TOKENS } from '../constants/contracts'

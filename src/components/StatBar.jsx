@@ -1,4 +1,19 @@
 import React from 'react'
+
+// ── wagmi shims ──────────────────────────────────────────────────────────────
+import { publicClient } from '../contexts/WalletContext.jsx'
+
+function useReadContract({ address, abi, functionName, args, enabled=true, watch=false }) {
+  const [data, setData] = React.useState(undefined)
+  const [isLoading, setIsLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!enabled || !address) return
+    setIsLoading(true)
+    publicClient.readContract({ address, abi, functionName, args }).then(setData).catch(()=>{}).finally(()=>setIsLoading(false))
+  }, [address, functionName, JSON.stringify(args), enabled])
+  return { data, isLoading, refetch: ()=>{} }
+}
+// ────────────────────────────────────────────────────────────────────────────
 import { useAccount } from '../contexts/WalletContext.jsx'
 
 import { CONTRACTS, RESOURCE_ICONS, RESOURCE_KEYS, RESOURCE_COLORS, RESOURCE_NAMES } from '../constants/contracts.js'

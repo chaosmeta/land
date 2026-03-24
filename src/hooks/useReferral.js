@@ -4,6 +4,32 @@
  */
 
 import { useAccount } from '../contexts/WalletContext.jsx'
+
+// ── wagmi shims ──────────────────────────────────────────────────────────────
+import { publicClient } from '../contexts/WalletContext.jsx'
+
+function useReadContracts({ contracts=[], enabled=true }) {
+  const [data, setData] = React.useState([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  React.useEffect(() => {
+    if (!enabled || !contracts.length) return
+    setIsLoading(true)
+    publicClient.multicall({ contracts, allowFailure:true }).then(r=>setData(r.map(x=>({result:x.result,status:x.status})))).catch(()=>setData([])).finally(()=>setIsLoading(false))
+  }, [JSON.stringify(contracts), enabled])
+  return { data, isLoading }
+}
+
+function useWriteContract() {
+  const [isPending, setIsPending] = React.useState(false)
+  async function writeContractAsync(params) {
+    // pages using this should migrate to wc.writeContract
+    setIsPending(true)
+    try { return await Promise.reject(new Error('migrate to wc.writeContract')) }
+    finally { setIsPending(false) }
+  }
+  return { writeContractAsync, isPending }
+}
+// ────────────────────────────────────────────────────────────────────────────
 import { CONTRACTS } from '../constants/contracts'
 import { REFERRAL_ABI } from '../constants/abi'
 
