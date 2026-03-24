@@ -16,6 +16,8 @@ export const CONTRACTS = {
 }
 
 export const NFT_AUCTION_ADDR = '0xe489Fd17B4aBF3b22482Bf0f09193f9902f1fd22'
+// 合约部署起始区块（避免 getLogs fromBlock:0 超出 RPC 50000 块限制）
+export const DEPLOY_BLOCK = 97519000n
 export const DEPLOYER = '0xe149fd4EFc7485ffae69f844bc93EA87a6a2e5b2'
 export const PANCAKE_ROUTER = '0xD99D1c33F9fC3444f8101754aBC46c52416550d1'
 export const WBNB = '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd'

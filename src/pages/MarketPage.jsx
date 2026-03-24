@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
 
 import { formatEther, encodeFunctionData, parseEther } from 'viem'
-import { CONTRACTS, NFT_AUCTION_ADDR } from '../constants/contracts'
+import { CONTRACTS, NFT_AUCTION_ADDR, DEPLOY_BLOCK } from '../constants/contracts'
 import { APO_EGG_GIF, drillImgUrl, landImgUrl, ELEM_SVGS, ELEMS } from '../constants/images'
 import './MarketPage.css'
 
@@ -72,14 +72,17 @@ async function loadMarketCache() {
 
 // ── 事件日志扫描（核心优化：一次getLogs拿所有在售） ──────────────────────
 async function fetchActiveListings(pc) {
+  // BSC Testnet RPC 限制 getLogs 最多 50000 块范围，必须从部署区块开始
+  const FROM = DEPLOY_BLOCK
+
   // 1. 从 NFTAuction 拿所有 AuctionCreated 事件
   const [created, won, cancelled] = await Promise.all([
-    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+0], // AuctionCreated
-      fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
-    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+1], // AuctionWon
-      fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
-    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+2], // AuctionCancelled
-      fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+0],
+      fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+1],
+      fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: NFT_AUCTION_ADDR, event: NFT_AUC_ABI[4+2],
+      fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
   ])
 
   // 2. 计算仍在售的：created - won - cancelled
@@ -97,9 +100,9 @@ async function fetchActiveListings(pc) {
 
   // 3. 旧拍卖合约的土地（AuctionCreated事件）
   const [oldCreated, oldWon, oldCxd] = await Promise.all([
-    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[0], fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
-    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[1], fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
-    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[2], fromBlock: 0n, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[0], fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[1], fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
+    pc.getLogs({ address: CONTRACTS.auction, event: OLD_AUC_EVENTS[2], fromBlock: FROM, toBlock: 'latest' }).catch(()=>[]),
   ])
   const oldSold = new Set(oldWon.map(e=>e.args.id?.toString()))
   const oldCxd2 = new Set(oldCxd.map(e=>e.args.id?.toString()))
