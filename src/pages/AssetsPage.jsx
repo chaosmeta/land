@@ -573,19 +573,24 @@ function MiningTab({pc,address,wc}){
     if(!address||!pc){setLoading(false);return}
     setLoading(true)
     try{
-      const LAND_IDS=[]
-      for(let x=0;x<=9;x++) for(let y=0;y<=4;y++) LAND_IDS.push(x*100+y+1)
-      // 找我的土地
-      const ownerRes=await pc.multicall({contracts:LAND_IDS.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
-      const myLandIds=LAND_IDS.filter((_,i)=>ownerRes[i]?.result?.toLowerCase()===address.toLowerCase())
-      // 还包括挖矿中的地块（owner是mining合约）
+      // 用后端API获取土地ID（快），再查slot
+      let allIds=[]
+      try{
+        const res=await fetch('/api/lands')
+        if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}
+      }catch{}
+      if(!allIds.length){for(let x=0;x<=9;x++) for(let y=0;y<=4;y++) allIds.push(x*100+y+1)}
+      // 找属于我 或 在挖矿中的地块
+      const ownerRes=await pc.multicall({contracts:allIds.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
       const miningAddr=CONTRACTS.mining.toLowerCase()
-      const miningLandIds=LAND_IDS.filter((_,i)=>ownerRes[i]?.result?.toLowerCase()===miningAddr)
-      const allIds=[...new Set([...myLandIds,...miningLandIds])]
-      if(allIds.length===0){setLands([]);setLoading(false);return}
-      const slotCounts=await pc.multicall({contracts:allIds.map(id=>({address:CONTRACTS.mining,abi:MINING_ABI,functionName:'slotCount',args:[BigInt(id)]})),allowFailure:true})
-      const activeLandIds=allIds.filter((_,i)=>Number(slotCounts[i]?.result??0n)>0)
-      if(activeLandIds.length===0){setLands([]);setLoading(false);return}
+      const relevantIds=allIds.filter((_,i)=>{
+        const o=ownerRes[i]?.result?.toLowerCase()
+        return o===address.toLowerCase()||o===miningAddr
+      })
+      if(!relevantIds.length){setLands([]);setLoading(false);return}
+      const slotCounts=await pc.multicall({contracts:relevantIds.map(id=>({address:CONTRACTS.mining,abi:MINING_ABI,functionName:'slotCount',args:[BigInt(id)]})),allowFailure:true})
+      const activeLandIds=relevantIds.filter((_,i)=>Number(slotCounts[i]?.result??0n)>0)
+      if(!activeLandIds.length){setLands([]);setLoading(false);return}
       const landData=[]
       for(const id of activeLandIds){
         const cnt=Number(await pc.readContract({address:CONTRACTS.mining,abi:MINING_ABI,functionName:'slotCount',args:[BigInt(id)]}))
@@ -608,10 +613,10 @@ function MiningTab({pc,address,wc}){
       await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 领取成功！');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
-  async function handleStop(landId,slotIdx){
+  async function handleStop(landId, apostleId){
     if(!wc)return; setMsg('停止挖矿...')
     try{
-      const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),BigInt(slotIdx)]})})
+      const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),BigInt(apostleId)]})})
       await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已停止');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
@@ -650,7 +655,7 @@ function MiningTab({pc,address,wc}){
                   <span>#{slot.apostleId?.toString()}</span>
                   <img src={drillImgUrl(0,1)} style={{width:22,height:22}}/>
                   <span>#{slot.drillId?.toString()}</span>
-                  <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id,j)}>停</button>
+                  <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id, slot.apostleId)}>停</button>
                 </div>
               ))}
             </div>

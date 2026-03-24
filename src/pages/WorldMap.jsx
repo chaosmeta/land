@@ -918,7 +918,7 @@ export default function WorldMap() {
                       <div className="wm-slot-inner">
                         <img src={drillImgUrl(s.drillElem||0, s.drillTier||1)} style={{width:36,height:36,objectFit:'contain'}}/>
                         <div className="wm-slot-lbl">#{s.drillId.toString()}</div>
-                        <div style={{fontSize:'.6rem',color:ELEMS[s.drillElem||0]?.color}}>{'★'.repeat(s.drillTier||1)}</div>
+                        <div style={{fontSize:'.6rem',color:ELEMS[s.drillElem||0]?.c}}>{'★'.repeat(s.drillTier||1)}</div>
                       </div>
                     ):<div className="wm-slot-add" style={{opacity:.3}}>—</div>}
                   </div>
@@ -956,14 +956,14 @@ export default function WorldMap() {
                     :<div className="wm-picker-grid">
                       {pickerItems.map(item=>(
                         <div key={item.id} className="wm-picker-item" onClick={()=>handlePlace(item)}
-                          style={{borderColor:item.elem!=null?ELEMS[item.elem||0].color+'33':undefined}}>
+                          style={{borderColor:item.elem!=null?ELEMS[item.elem||0].c+'33':undefined}}>
                           <img src={
                             picker==='apostle' ? APO_EGG_GIF : drillImgUrl(item.elem||0,item.tier||1)
                           } style={{width:40,height:40,objectFit:'contain',imageRendering:'pixelated',
                             filter:picker==='apostle'?`hue-rotate(${(item.elem||0)*72}deg) saturate(1.3)`:''}}/>
                           <div style={{fontSize:'.7rem',color:'#c090ff'}}>#{item.id}</div>
-                          <div style={{fontSize:'.65rem',color:ELEMS[item.elem||0].color,display:'flex',alignItems:'center',gap:2}}>
-                            <img src={ELEM_SVGS[item.elem||0]} style={{width:10,height:10}}/>{ELEMS[item.elem||0].name}
+                          <div style={{fontSize:'.65rem',color:ELEMS[item.elem||0].c,display:'flex',alignItems:'center',gap:2}}>
+                            <img src={ELEM_SVGS[item.elem||0]} style={{width:10,height:10}}/>{ELEMS[item.elem||0].k}
                             {item.strength!=null&&` 力${item.strength}`}
                             {item.tier!=null&&` ${'★'.repeat(item.tier)}`}
                           </div>
