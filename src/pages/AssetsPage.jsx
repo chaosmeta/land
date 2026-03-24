@@ -244,39 +244,74 @@ function LandTab({pc,address,wc}){
     if(!address||!pc){setLoading(false);return}
     setLoading(true)
     try{
-      // ownerOf 扫描方式（Land没有enumerable）
-      const LAND_IDS=[]
-      for(let x=0;x<=9;x++) for(let y=0;y<=4;y++) LAND_IDS.push(x*100+y+1)
-      for(let x=10;x<=19;x++) LAND_IDS.push(x*100+1)
-      const ownerRes=await pc.multicall({contracts:LAND_IDS.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
-      const myIds=LAND_IDS.filter((_,i)=>ownerRes[i]?.result?.toLowerCase()===address.toLowerCase())
+      // 1. 优先从后端 API 获取所有铸造的土地 ID（快速）
+      let allIds=[]
+      try{
+        const res=await fetch('/api/lands')
+        if(res.ok){const d=await res.json();if(d.ok)allIds=d.lands.map(l=>l.id)}
+      }catch{}
+      // 兜底：扫描固定范围
+      if(allIds.length===0){
+        for(let x=0;x<12;x++) for(let y=0;y<5;y++) allIds.push(x*100+y+1)
+      }
+      // 2. 批量查 ownerOf 找属于自己的土地
+      const BATCH=100
+      const myIds=[]
+      for(let i=0;i<allIds.length;i+=BATCH){
+        const batch=allIds.slice(i,i+BATCH)
+        const ownerRes=await pc.multicall({contracts:batch.map(id=>({address:CONTRACTS.land,abi:[{type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'}],functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
+        batch.forEach((id,j)=>{if(ownerRes[j]?.result?.toLowerCase()===address.toLowerCase())myIds.push(id)})
+      }
       if(myIds.length===0){setLands([]);setLoading(false);return}
-      const [attrs,slots,auctions]=await Promise.all([
+      // 3. 读资源属性、挖矿槽、两个拍卖合约
+      const NFT_AUC_ABI_MIN=[{type:'function',name:'getAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[{components:[{name:'nftContract',type:'address'},{name:'seller',type:'address'},{name:'startPrice',type:'uint128'},{name:'endPrice',type:'uint128'},{name:'duration',type:'uint64'},{name:'startedAt',type:'uint64'}],type:'tuple'}],stateMutability:'view'}]
+      const [attrs,slots,oldAucs,newAucs]=await Promise.all([
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.land,abi:LAND_ABI,functionName:'resourceAttr',args:[BigInt(id)]})),allowFailure:true}),
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.mining,abi:MINING_ABI,functionName:'slotCount',args:[BigInt(id)]})),allowFailure:true}),
         pc.multicall({contracts:myIds.map(id=>({address:CONTRACTS.auction,abi:AUC_ABI,functionName:'auctions',args:[BigInt(id)]})),allowFailure:true}),
+        pc.multicall({contracts:myIds.map(id=>({address:NFT_AUCTION_ADDR,abi:NFT_AUC_ABI_MIN,functionName:'getAuction',args:[CONTRACTS.land,BigInt(id)]})),allowFailure:true}),
       ])
-      setLands(myIds.map((id,i)=>({id,resourceAttr:attrs[i]?.result??0n,slots:Number(slots[i]?.result??0n),auction:auctions[i]?.result})))
+      setLands(myIds.map((id,i)=>{
+        const oldA=oldAucs[i]?.result
+        const newA=newAucs[i]?.result
+        const inOldAuc=oldA&&oldA[4]>0n
+        const inNewAuc=newA&&newA.startedAt>0n
+        return{id,resourceAttr:attrs[i]?.result??0n,slots:Number(slots[i]?.result??0n),inAuction:inOldAuc||inNewAuc,auctionType:inNewAuc?'new':inOldAuc?'old':'none'}
+      }))
     }catch(e){console.error(e)}
     setLoading(false)
   },[address,pc])
   useEffect(()=>{load()},[load])
 
   async function handleSell(landId){
-    if(!wc)return; setMsg('授权中...')
+    if(!wc){alert('请先连接钱包');return}
+    setMsg('授权中...')
     try{
-      const isAppr=await pc.readContract({address:CONTRACTS.land,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,CONTRACTS.auction]})
-      if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.land,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[CONTRACTS.auction,true]})});await pc.waitForTransactionReceipt({hash:h})}
+      // 使用新的 NFTAuction 合约挂土地
+      const NFT_AUC_ABI_MIN=[
+        {type:'function',name:'createAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'},{name:'sp',type:'uint128'},{name:'ep',type:'uint128'},{name:'dur',type:'uint64'}],outputs:[],stateMutability:'nonpayable'},
+      ]
+      const isAppr=await pc.readContract({address:CONTRACTS.land,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
+      if(!isAppr){
+        const h=await wc.sendTransaction({to:CONTRACTS.land,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})})
+        await pc.waitForTransactionReceipt({hash:h})
+      }
       setMsg('挂单中...')
-      const h=await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'createAuction',args:[BigInt(landId),parseEther(sellPrice),parseEther('1'),BigInt(3*24*3600)]})})
+      const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI_MIN,functionName:'createAuction',args:[CONTRACTS.land,BigInt(landId),parseEther(sellPrice),parseEther('1'),BigInt(3*24*3600)]})})
       await pc.waitForTransactionReceipt({hash:h})
-      setMsg('✅ 挂单成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
+      setMsg('✅ 挂单成功！去市场→土地查看');setSellModal(null);setTimeout(()=>{setMsg('');load()},3000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
-  async function handleCancel(landId){
+  async function handleCancel(landId, auctionType){
     if(!wc)return; setMsg('撤销中...')
     try{
-      const h=await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'cancelAuction',args:[BigInt(landId)]})})
+      let h
+      if(auctionType==='old'){
+        h=await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'cancelAuction',args:[BigInt(landId)]})})
+      } else {
+        const NFT_AUC_CANCEL=[{type:'function',name:'cancelAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[],stateMutability:'nonpayable'}]
+        h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_CANCEL,functionName:'cancelAuction',args:[CONTRACTS.land,BigInt(landId)]})})
+      }
       await pc.waitForTransactionReceipt({hash:h})
       setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
@@ -303,19 +338,19 @@ function LandTab({pc,address,wc}){
       <div className="as-nft-grid">
         {lands.map(l=>{
           const vals=decodeAttr(l.resourceAttr),maxV=Math.max(1,...vals)
-          const inAuction=l.auction&&l.auction[4]>0n
+          const inAuction=l.inAuction
           return(
             <div key={l.id} className="as-nft-card">
               <div className="as-nft-img-wrap"><img src={landImgUrl(l.id)} alt="land" className="as-nft-img"/></div>
               <div className="as-nft-body">
                 <div className="as-nft-title">土地 #{l.id} <span style={{fontSize:'.6rem',color:'#4030a0'}}>({(l.id-1)%100},{Math.floor((l.id-1)/100)})</span></div>
-                {l.slots>0&&<div style={{fontSize:'.68rem',color:'#f0c040'}}>⛏️ {l.slots}槽挖矿</div>}
+                {l.slots>0&&<div style={{fontSize:'.68rem',color:'#f0c040'}}>⛏️ {l.slots}槽挖矿中</div>}
                 {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
                 <div className="as-res-bars">{vals.map((v,i)=><div key={i} className="as-res-bar-row"><ElemIcon i={i} size={11}/><div className="as-res-bar-bg"><div style={{width:`${(v/maxV*100).toFixed(0)}%`,height:'100%',background:ELEMS[i].color,borderRadius:2}}/></div><span style={{color:ELEMS[i].color,fontSize:'.62rem',minWidth:22}}>{v}</span></div>)}</div>
                 <div className="as-nft-actions">
                   {inAuction
-                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(l.id)}>撤销</button>
-                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖</button>
+                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(l.id,l.auctionType)}>撤销挂单</button>
+                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖到市场</button>
                   }
                 </div>
               </div>
