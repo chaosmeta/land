@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-
+import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
 import { encodeFunctionData, formatEther } from 'viem'
 import { APO_EGG_GIF, drillImgUrl, ELEM_SVGS, ELEMS } from '../constants/images'
 import { CONTRACTS } from '../constants/contracts'

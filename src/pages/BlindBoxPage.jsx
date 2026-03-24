@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
 
 import { formatEther, encodeFunctionData } from 'viem'
 import { CONTRACTS } from '../constants/contracts'
