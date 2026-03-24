@@ -11,11 +11,15 @@ const ABI = {
   batchMint:   [{ name:'batchMint',         type:'function', stateMutability:'nonpayable', inputs:[{name:'xs',type:'int16[]'},{name:'ys',type:'int16[]'},{name:'attrs',type:'uint80[]'},{name:'to',type:'address'}], outputs:[] }],
   apostleMint: [{ name:'mint',              type:'function', stateMutability:'nonpayable', inputs:[{name:'to',type:'address'},{name:'strength',type:'uint8'},{name:'element',type:'uint8'}], outputs:[{type:'uint256'}] }],
   drillMint:   [{ name:'mint',              type:'function', stateMutability:'nonpayable', inputs:[{name:'to',type:'address'},{name:'tier',type:'uint8'},{name:'affinity',type:'uint8'}], outputs:[{type:'uint256'}] }],
+  erc20Mint:   [{ name:'mint',              type:'function', stateMutability:'nonpayable', inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}], outputs:[] }],
+  erc20Transfer:[{ name:'transfer',         type:'function', stateMutability:'nonpayable', inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}], outputs:[{type:'bool'}] }],
+  erc20Bal:    [{ name:'balanceOf',         type:'function', stateMutability:'view',       inputs:[{name:'a',type:'address'}], outputs:[{type:'uint256'}] }],
   setApprAll:  [{ name:'setApprovalForAll', type:'function', stateMutability:'nonpayable', inputs:[{name:'operator',type:'address'},{name:'approved',type:'bool'}], outputs:[] }],
   setOperator: [{ name:'setOperator',       type:'function', stateMutability:'nonpayable', inputs:[{name:'a',type:'address'},{name:'v',type:'bool'}], outputs:[] }],
   startMining: [{ name:'startMining',       type:'function', stateMutability:'nonpayable', inputs:[{name:'landId',type:'uint256'},{name:'apostleId',type:'uint256'},{name:'drillId',type:'uint256'}], outputs:[] }],
   oldAucCreate:[{ name:'createAuction',     type:'function', stateMutability:'nonpayable', inputs:[{name:'id',type:'uint256'},{name:'startPrice',type:'uint128'},{name:'endPrice',type:'uint128'},{name:'duration',type:'uint64'}], outputs:[] }],
   nftAucCreate:[{ name:'createAuction',     type:'function', stateMutability:'nonpayable', inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'},{name:'sp',type:'uint128'},{name:'ep',type:'uint128'},{name:'dur',type:'uint64'}], outputs:[] }],
+  pendingRew:  [{ name:'pendingRewards',    type:'function', stateMutability:'view',       inputs:[{name:'l',type:'uint256'}], outputs:[{type:'uint256[5]'}] }],
   approve:     [{ name:'approve',           type:'function', stateMutability:'nonpayable', inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}], outputs:[{type:'bool'}] }],
   nextId:      [{ name:'nextId',            type:'function', stateMutability:'view',       inputs:[], outputs:[{type:'uint256'}] }],
   ownerOf:     [{ name:'ownerOf',           type:'function', stateMutability:'view',       inputs:[{name:'id',type:'uint256'}], outputs:[{type:'address'}] }],
@@ -199,7 +203,55 @@ export default function AdminPage() {
     setBusy(false)
   }
 
-  // ── 未连接 / 非管理员 ──────────────────────────────────────────────────
+  // ── 充值挖矿奖励池 ─────────────────────────────────────────────────────
+  async function fundRewardPool() {
+    if (!wc) return
+    setBusy(true); setLogs([])
+    try {
+      log('💰 检查挖矿奖励池...')
+
+      // 5种资源 token 合约
+      const resourceTokens = [
+        { sym:'GOLD', addr:CONTRACTS.gold  },
+        { sym:'WOOD', addr:CONTRACTS.wood  },
+        { sym:'HHO',  addr:CONTRACTS.water },
+        { sym:'FIRE', addr:CONTRACTS.fire  },
+        { sym:'SIOO', addr:CONTRACTS.soil  },
+      ]
+
+      // 计算所有土地的待领奖励总量（确定需要充值多少）
+      const landIds = []
+      for(let x=0;x<12;x++) for(let y=0;y<5;y++) landIds.push(x*100+y+1)
+      const totals = [0n,0n,0n,0n,0n]
+      log('📊 计算待发奖励总量...')
+      for(const id of landIds){
+        try{
+          const r = await pc.readContract({address:CONTRACTS.mining,abi:ABI.pendingRew,functionName:'pendingRewards',args:[BigInt(id)]})
+          r.forEach((v,i)=>{totals[i]+=v})
+        }catch{}
+      }
+      log(`📊 总待领奖励: ${resourceTokens.map((t,i)=>`${t.sym}:${(Number(totals[i])/1e18).toFixed(0)}`).join(', ')}`)
+
+      // 给 Mining 合约充值 2x 安全边际
+      const SAFETY = 2n
+      for(let i=0;i<5;i++){
+        const needed = totals[i] * SAFETY + parseEther('10000') // 底仓 10000
+        const curBal = await pc.readContract({address:resourceTokens[i].addr,abi:ABI.erc20Bal,functionName:'balanceOf',args:[CONTRACTS.mining]}).catch(()=>0n)
+        if(curBal >= needed){
+          log(`  ✅ ${resourceTokens[i].sym} 已有足够余额 (${(Number(curBal)/1e18).toFixed(0)})`, 'success')
+          continue
+        }
+        const mintAmt = needed - curBal
+        log(`  🪙 Mint ${(Number(mintAmt)/1e18).toFixed(0)} ${resourceTokens[i].sym} 到 Mining 合约...`)
+        // mint 直接到 Mining 合约
+        await sendTx(wc, pc, resourceTokens[i].addr, ABI.erc20Mint, 'mint', [CONTRACTS.mining, mintAmt])
+        const newBal = await pc.readContract({address:resourceTokens[i].addr,abi:ABI.erc20Bal,functionName:'balanceOf',args:[CONTRACTS.mining]}).catch(()=>0n)
+        log(`  ✅ ${resourceTokens[i].sym} Mining余额: ${(Number(newBal)/1e18).toFixed(0)}`, 'success')
+      }
+      log('🎉 奖励池充值完成！用户现在可以正常领取资源了', 'success')
+    } catch(e) { log('❌ '+(e.shortMessage||e.message), 'error') }
+    setBusy(false)
+  }
   if (!address) return (
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',flexDirection:'column',gap:12,color:'var(--text-dim)'}}>
       <div style={{fontSize:48,opacity:.3}}>🛠</div>
@@ -265,6 +317,11 @@ export default function AdminPage() {
             <div className="ac-title">⚒️ 批量开挖矿</div>
             <div className="ac-desc">将持有的使徒+钻头<br/>放置到持有土地上挖矿</div>
             <button className="admin-btn-sm" onClick={startMining} disabled={busy}>开始挖矿</button>
+          </div>
+          <div className="admin-card" style={{border:'1px solid #f0a04044'}}>
+            <div className="ac-title" style={{color:'#f0c040'}}>💰 充值奖励池</div>
+            <div className="ac-desc">Mint 资源 token 到 Mining 合约<br/>用户才能正常领取挖矿收益</div>
+            <button className="admin-btn-sm" style={{background:'linear-gradient(135deg,#806010,#404000)'}} onClick={fundRewardPool} disabled={busy}>充值奖励池</button>
           </div>
         </div>
       </div>

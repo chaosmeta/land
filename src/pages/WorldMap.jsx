@@ -767,8 +767,15 @@ export default function WorldMap() {
     try{
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'claim',args:[BigInt(landId)]})})
       await pc.waitForTransactionReceipt({hash:h})
-      alert('领取成功！')
-    }catch(e){alert('领取失败: '+(e.shortMessage||e.message))}
+      alert('✅ 领取成功！')
+    }catch(e){
+      const m=e.shortMessage||e.message||''
+      if(m.includes('internal')||m.includes('Internal')){
+        alert('❌ 领取失败：奖励池余额不足，请联系管理员在「管理员工具」→「充值奖励池」进行充值')
+      } else {
+        alert('领取失败: '+m)
+      }
+    }
   }
 
   return (

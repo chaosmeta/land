@@ -628,7 +628,14 @@ function MiningTab({pc,address,wc}){
     try{
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'claim',args:[BigInt(landId)]})})
       await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 领取成功！');setTimeout(()=>{setMsg('');load()},2000)
-    }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
+    }catch(e){
+      const m=e.shortMessage||e.message||''
+      if(m.includes('internal')||m.includes('Internal')){
+        setMsg('❌ 领取失败：奖励池余额不足，请联系管理员充值资源 token')
+      } else {
+        setMsg('❌ '+ m)
+      }
+    }
   }
   async function handleStop(landId,apostleId){
     if(!wc)return; setMsg('停止挖矿...')
