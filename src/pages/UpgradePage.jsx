@@ -6,7 +6,7 @@ import './UpgradePage.css'
 
 // ── 升级合约地址（部署后填入）──────────────────────────────────────────
 // 暂时为空，等管理员部署后填入
-const UPGRADE_ADDR = '' // TODO: 部署 UpgradeSystem 后填入
+const UPGRADE_ADDR = '0xd8083a57b479bb920d52f0db2257936023b49ea7'
 
 // ── ABIs ──────────────────────────────────────────────────────────────────
 const ERC20_ABI = [

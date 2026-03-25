@@ -6,7 +6,7 @@ import { ELEMS, landImgUrl } from '../constants/images'
 import './RentalPage.css'
 
 // ── 租赁合约地址（部署后填入）──────────────────────────────────────────
-const RENTAL_ADDR = '' // TODO: 部署 LandRental 后填入
+const RENTAL_ADDR = '0x7fb3cdf115552721b3f19f06592c07c83f6c7858'
 
 // ── ABIs ──────────────────────────────────────────────────────────────────
 const RING_ABI = [
