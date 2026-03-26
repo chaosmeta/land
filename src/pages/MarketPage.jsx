@@ -202,9 +202,10 @@ function getApoStats(id,str,el){const s=id*137+str;return{mining:(0.5+sr(s+1)*3)
 function getDrlStats(id,tier){const s=id*97+tier;return{efficiency:(0.5+sr(s+1)*tier*0.8).toFixed(2),durability:Math.floor(50+sr(s+2)*tier*20),capacity:Math.floor(10+sr(s+3)*tier*15),speed:(0.5+sr(s+4)*2).toFixed(2)}}
 
 // ── 详情弹窗（复用原版） ────────────────────────────────────────────────
-function ApostleDetail({item,onClose,onBuy}){
+function ApostleDetail({item,onClose,onBuy,address}){
   if(!item)return null
   const e=item.elem||0,st=getApoStats(item.id,item.strength||30,e)
+  const isMe=address&&item.seller?.toLowerCase()===address.toLowerCase()
   return(
     <div className="mk-modal-bg" onClick={onClose}>
       <div className="mk-modal" onClick={ev=>ev.stopPropagation()}>
@@ -215,7 +216,7 @@ function ApostleDetail({item,onClose,onBuy}){
           </div>
           <div className="mk-apo-info">
             <div className="mk-apo-name">{['精灵之子','战魂斗士','自然守护','烈焰战神','大地守卫'][e]}_{item.id}</div>
-            <div className="mk-apo-addr">{fmtAddr(item.seller)}</div>
+            <div className="mk-apo-addr" style={{color:isMe?'#52c462':'#7060a0'}}>{isMe?'⭐ 我的':fmtAddr(item.seller)}</div>
             <div className="mk-apo-desc">力量 <b style={{color:ELEMS[e].color}}>{item.strength||30}</b> · <ElemIcon i={e} size={14}/>{ELEMS[e].name}系</div>
           </div>
           <button className="mk-modal-close" onClick={onClose}>✕</button>
@@ -225,15 +226,22 @@ function ApostleDetail({item,onClose,onBuy}){
             <div className="mk-ability-row">{[['挖矿力',st.mining],['攻击力',st.attack],['血量',st.hp],['防御力',st.defense],['暴击',st.crit]].map(([k,v])=><div key={k} className="mk-ability-item"><div className="mk-ab-k">{k}</div><div className="mk-ab-v">{v}</div></div>)}</div></div>
           <div className="mk-modal-sec"><div className="mk-modal-sec-title">✨ 天赋</div>
             <div className="mk-talent-grid">{[['画命',st.life],['心情',st.mood],['力量',st.power],['敏捷',st.agility],['灵巧',st.finesse],['生命',st.vitality],['智力',st.wisdom],['幸运',st.luck],['潜力',st.potential],['魅力',st.charm]].map(([k,v])=><div key={k} className="mk-talent-item"><span className="mk-tal-k">{k}</span><span className="mk-tal-v">{v}</span></div>)}</div></div>
-          <div className="mk-modal-buy"><div className="mk-modal-price"><span>{fmtR(item.currentPrice)}</span> RING</div><button className="mk-buy-btn-lg" onClick={()=>onBuy(item.id,item.currentPrice,item.seller)}>💰 立即购买</button></div>
+          <div className="mk-modal-buy">
+            <div className="mk-modal-price"><span>{fmtR(item.currentPrice)}</span> RING</div>
+            {isMe
+              ?<button className="mk-buy-btn-lg" style={{background:'linear-gradient(135deg,#a02020,#600808)'}} onClick={()=>onBuy(item.id,null,item.seller)}>❌ 撤销挂单</button>
+              :<button className="mk-buy-btn-lg" onClick={()=>onBuy(item.id,item.currentPrice,item.seller)}>💰 立即购买</button>
+            }
+          </div>
         </div>
       </div>
     </div>
   )
 }
-function DrillDetail({item,onClose,onBuy}){
+function DrillDetail({item,onClose,onBuy,address}){
   if(!item)return null
   const a=item.elem||0,t=item.tier||1,st=getDrlStats(item.id,t)
+  const isMe=address&&item.seller?.toLowerCase()===address.toLowerCase()
   return(
     <div className="mk-modal-bg" onClick={onClose}>
       <div className="mk-modal" onClick={ev=>ev.stopPropagation()}>
@@ -241,7 +249,7 @@ function DrillDetail({item,onClose,onBuy}){
           <div className="mk-apo-avatar"><img src={drillImgUrl(a,t)} alt="drill" className="mk-apo-img"/></div>
           <div className="mk-apo-info">
             <div className="mk-apo-name">{['精金钻','翠木钻','碧水钻','烈火钻','厚土钻'][a]} #{item.id}</div>
-            <div className="mk-apo-addr">{fmtAddr(item.seller)}</div>
+            <div className="mk-apo-addr" style={{color:isMe?'#52c462':'#7060a0'}}>{isMe?'⭐ 我的':fmtAddr(item.seller)}</div>
             <div className="mk-apo-desc"><ElemIcon i={a} size={14}/>{ELEMS[a].name}系 · {'★'.repeat(t)} 品质</div>
           </div>
           <button className="mk-modal-close" onClick={onClose}>✕</button>
@@ -249,7 +257,13 @@ function DrillDetail({item,onClose,onBuy}){
         <div className="mk-modal-body">
           <div className="mk-modal-sec"><div className="mk-modal-sec-title">⛏️ 属性</div>
             <div className="mk-ability-row">{[['效率',st.efficiency],['耐久',st.durability],['容量',st.capacity],['速度',st.speed+'x']].map(([k,v])=><div key={k} className="mk-ability-item"><div className="mk-ab-k">{k}</div><div className="mk-ab-v">{v}</div></div>)}</div></div>
-          <div className="mk-modal-buy"><div className="mk-modal-price"><span>{fmtR(item.currentPrice)}</span> RING</div><button className="mk-buy-btn-lg" onClick={()=>onBuy(item.id,item.currentPrice,item.seller)}>💰 立即购买</button></div>
+          <div className="mk-modal-buy">
+            <div className="mk-modal-price"><span>{fmtR(item.currentPrice)}</span> RING</div>
+            {isMe
+              ?<button className="mk-buy-btn-lg" style={{background:'linear-gradient(135deg,#a02020,#600808)'}} onClick={()=>onBuy(item.id,null,item.seller)}>❌ 撤销挂单</button>
+              :<button className="mk-buy-btn-lg" onClick={()=>onBuy(item.id,item.currentPrice,item.seller)}>💰 立即购买</button>
+            }
+          </div>
         </div>
       </div>
     </div>
@@ -287,13 +301,15 @@ function LandDetail({item,onClose,onBuy,address}){
 }
 
 // ── 卡片组件 ─────────────────────────────────────────────────────────────
-function Card({item,type,onDetail}){
+function Card({item,type,onDetail,address}){
   const e=item.elem??0,t=item.tier||1
   const left=Math.max(0,item.endsAt-Math.floor(Date.now()/1000))
   const h=Math.floor(left/3600),m=Math.floor(left%3600/60)
   const imgSrc=type==='drill'?drillImgUrl(e,t):type==='apostle'?APO_EGG_GIF:landImgUrl(item.id)
+  const isMe=address&&item.seller?.toLowerCase()===address.toLowerCase()
   return(
-    <div className="mk-card" onClick={()=>onDetail(item)}>
+    <div className="mk-card" onClick={()=>onDetail(item)} style={isMe?{border:'1px solid #52c46244',boxShadow:'0 0 8px #52c46222'}:{}}>
+      {isMe&&<div style={{position:'absolute',top:6,right:6,zIndex:2,background:'#52c46299',color:'#fff',fontSize:'.6rem',fontWeight:700,padding:'2px 6px',borderRadius:10}}>⭐ 我的</div>}
       {type==='apostle'&&<div className="mk-card-no-bar"><span className="mk-card-no">No. {String(item.id).padStart(4,'0')}</span></div>}
       <div className="mk-card-top" style={{background:type==='land'?'linear-gradient(135deg,#0a1a0a,#0a0814)':`linear-gradient(135deg,${ELEMS[e].color}22,#0a0814)`}}>
         <img src={imgSrc} alt={type} className="mk-card-img" style={type==='land'?{objectFit:'cover',width:'100%',height:'100%'}:{objectFit:'contain',filter:type==='apostle'?`hue-rotate(${e*72}deg) saturate(1.3)`:''}}/>
@@ -307,7 +323,7 @@ function Card({item,type,onDetail}){
         {type==='drill'&&<div className="mk-card-sub" style={{color:ELEMS[e].color}}><ElemIcon i={e} size={10}/>{ELEMS[e].name} · {t}星</div>}
         {type==='land'&&<div className="mk-card-sub" style={{color:'#70a070'}}>({(item.id-1)%100},{Math.floor((item.id-1)/100)})</div>}
         <div className="mk-card-price">{fmtR(item.currentPrice)} <span>RING</span></div>
-        <div className="mk-card-footer"><span className="mk-card-time">{h>0?h+'h ':''}{m}m</span><span className="mk-card-seller">{fmtAddr(item.seller)}</span></div>
+        <div className="mk-card-footer"><span className="mk-card-time">{h>0?h+'h ':''}{m}m</span><span className="mk-card-seller" style={isMe?{color:'#52c462'}:{}}>{isMe?'⭐ 我的':fmtAddr(item.seller)}</span></div>
       </div>
     </div>
   )
@@ -463,15 +479,15 @@ export default function MarketPage(){
         ?<div className="mk-loading"><span className="mk-spin"/>从链上事件索引扫描...</div>
         :cur.length===0&&status==='done'
           ?<div className="mk-empty"><div style={{fontSize:'3rem',opacity:.3}}>{tab==='land'?'🏡':tab==='apostle'?'🧙':'⛏️'}</div><div>暂无在售商品</div></div>
-          :<div className="mk-grid">{cur.map(item=><Card key={item.id} item={item} type={tab} onDetail={setDetail}/>)}</div>
+          :<div className="mk-grid">{cur.map(item=><Card key={item.id} item={item} type={tab} onDetail={setDetail} address={address}/>)}</div>
       }
       <div className="mk-footer">
         共<b>{cur.length}</b>件 · 土地<b>{lands.length}</b> · 使徒<b>{apostles.length}</b> · 钻头<b>{drills.length}</b>
         {status==='loading'&&cur.length>0&&<span style={{color:'#5040a0',marginLeft:8}}><span className="mk-spin" style={{width:10,height:10}}/> 更新中</span>}
       </div>
       {detail&&tab==='land'&&<LandDetail item={detail} onClose={()=>setDetail(null)} onBuy={(id,p,s)=>handleBuy(id,p,s,'land')} address={address}/>}
-      {detail&&tab==='apostle'&&<ApostleDetail item={detail} onClose={()=>setDetail(null)} onBuy={(id,p,s)=>handleBuy(id,p,s,'apostle')}/>}
-      {detail&&tab==='drill'&&<DrillDetail item={detail} onClose={()=>setDetail(null)} onBuy={(id,p,s)=>handleBuy(id,p,s,'drill')}/>}
+      {detail&&tab==='apostle'&&<ApostleDetail item={detail} onClose={()=>setDetail(null)} onBuy={(id,p,s)=>handleBuy(id,p,s,'apostle')} address={address}/>}
+      {detail&&tab==='drill'&&<DrillDetail item={detail} onClose={()=>setDetail(null)} onBuy={(id,p,s)=>handleBuy(id,p,s,'drill')} address={address}/>}
     </div>
   )
 }
