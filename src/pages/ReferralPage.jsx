@@ -1,53 +1,50 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAccount, useWalletClient, usePublicClient } from '../contexts/WalletContext.jsx'
 import { encodeFunctionData, formatEther } from 'viem'
-import { CONTRACTS, RESOURCE_TOKENS, RES_NAMES_ZH, RESOURCE_ICONS } from '../constants/contracts'
-import { REFERRAL_ABI } from '../constants/abi'
+import { CONTRACTS, RESOURCE_TOKENS, RESOURCE_ICONS } from '../constants/contracts'
 import './ReferralPage.css'
 
 const LEVEL_RATES  = ['5%', '3%', '2%', '1%', '0.5%']
 const LEVEL_COLORS = ['#f59e0b', '#94a3b8', '#cd7f32', '#60a5fa', '#a78bfa']
+const RES_SYMS     = ['GOLD', 'WOOD', 'HHO', 'FIRE', 'SIOO']
 
-const READ_ABI = [
-  { type:'function', name:'bound',        inputs:[{name:'u',type:'address'}], outputs:[{type:'bool'}],     stateMutability:'view' },
-  { type:'function', name:'referrer',     inputs:[{name:'u',type:'address'}], outputs:[{type:'address'}],  stateMutability:'view' },
-  { type:'function', name:'getRates',     inputs:[],                          outputs:[{type:'uint256[5]'}],stateMutability:'view' },
-  { type:'function', name:'totalEarned',  inputs:[{name:'u',type:'address'},{name:'t',type:'address'}], outputs:[{type:'uint256'}], stateMutability:'view' },
-  { type:'function', name:'bind',         inputs:[{name:'ref',type:'address'}], outputs:[],               stateMutability:'nonpayable' },
+const REF_ABI = [
+  { type:'function', name:'bound',       inputs:[{name:'u',type:'address'}], outputs:[{type:'bool'}],      stateMutability:'view' },
+  { type:'function', name:'referrer',    inputs:[{name:'u',type:'address'}], outputs:[{type:'address'}],   stateMutability:'view' },
+  { type:'function', name:'getRates',    inputs:[],                          outputs:[{type:'uint256[5]'}], stateMutability:'view' },
+  { type:'function', name:'totalEarned', inputs:[{name:'u',type:'address'},{name:'t',type:'address'}], outputs:[{type:'uint256'}], stateMutability:'view' },
+  { type:'function', name:'bind',        inputs:[{name:'ref',type:'address'}], outputs:[], stateMutability:'nonpayable' },
 ]
 
 export default function ReferralPage() {
   const { address, isConnected } = useAccount()
-  const { data: wc }  = useWalletClient()
-  const pc            = usePublicClient()
+  const { data: wc } = useWalletClient()
+  const pc           = usePublicClient()
 
-  const [inputRef, setInputRef]   = useState('')
-  const [isBound, setIsBound]     = useState(false)
-  const [myRef, setMyRef]         = useState('')
-  const [rates, setRates]         = useState([])
-  const [earnings, setEarnings]   = useState([])
-  const [msg, setMsg]             = useState('')
-  const [busy, setBusy]           = useState(false)
+  const [inputRef, setInputRef] = useState('')
+  const [isBound,  setIsBound]  = useState(false)
+  const [myRef,    setMyRef]    = useState('')
+  const [rates,    setRates]    = useState([])
+  const [earnings, setEarnings] = useState([])
+  const [msg,      setMsg]      = useState('')
+  const [busy,     setBusy]     = useState(false)
 
   const load = useCallback(async () => {
     if (!address || !pc) return
     try {
       const [bound, referrer, ratesRaw] = await Promise.all([
-        pc.readContract({ address: CONTRACTS.referral, abi: READ_ABI, functionName: 'bound',    args: [address] }).catch(() => false),
-        pc.readContract({ address: CONTRACTS.referral, abi: READ_ABI, functionName: 'referrer', args: [address] }).catch(() => ''),
-        pc.readContract({ address: CONTRACTS.referral, abi: READ_ABI, functionName: 'getRates' }).catch(() => []),
+        pc.readContract({ address:CONTRACTS.referral, abi:REF_ABI, functionName:'bound',    args:[address] }).catch(()=>false),
+        pc.readContract({ address:CONTRACTS.referral, abi:REF_ABI, functionName:'referrer', args:[address] }).catch(()=>''),
+        pc.readContract({ address:CONTRACTS.referral, abi:REF_ABI, functionName:'getRates' }).catch(()=>[]),
       ])
-      setIsBound(bound)
-      setMyRef(referrer)
-      setRates(ratesRaw)
-
+      setIsBound(bound); setMyRef(referrer); setRates(ratesRaw)
       const earns = await Promise.all(
-        RESOURCE_TOKENS.map(tokenAddr =>
-          pc.readContract({ address: CONTRACTS.referral, abi: READ_ABI, functionName: 'totalEarned', args: [address, tokenAddr] }).catch(() => 0n)
+        RESOURCE_TOKENS.map(addr =>
+          pc.readContract({ address:CONTRACTS.referral, abi:REF_ABI, functionName:'totalEarned', args:[address, addr] }).catch(()=>0n)
         )
       )
       setEarnings(earns)
-    } catch (e) { console.error(e) }
+    } catch(e) { console.error(e) }
   }, [address, pc])
 
   useEffect(() => { load() }, [load])
@@ -59,27 +56,22 @@ export default function ReferralPage() {
     try {
       const h = await wc.sendTransaction({
         to: CONTRACTS.referral,
-        data: encodeFunctionData({ abi: READ_ABI, functionName: 'bind', args: [inputRef] })
+        data: encodeFunctionData({ abi:REF_ABI, functionName:'bind', args:[inputRef] })
       })
-      await pc.waitForTransactionReceipt({ hash: h })
-      setMsg('✅ 绑定成功！')
-      setInputRef('')
-      load()
-    } catch (e) {
-      setMsg('❌ ' + (e.shortMessage || e.message))
-    } finally { setBusy(false) }
+      await pc.waitForTransactionReceipt({ hash:h })
+      setMsg('✅ 绑定成功！'); setInputRef(''); load()
+    } catch(e) { setMsg('❌ ' + (e.shortMessage || e.message)) }
+    finally { setBusy(false) }
   }
 
   function copyLink() {
-    const link = `${window.location.origin}?ref=${address}`
-    navigator.clipboard.writeText(link).then(() => setMsg('✅ 邀请链接已复制！'))
+    navigator.clipboard.writeText(`${window.location.origin}?ref=${address}`)
+      .then(() => setMsg('✅ 邀请链接已复制！'))
   }
 
   if (!isConnected) return (
     <div className="referral-page"><div className="connect-prompt">请先连接钱包</div></div>
   )
-
-  const refLink = `${window.location.origin}?ref=${address}`
 
   return (
     <div className="referral-page">
@@ -87,19 +79,28 @@ export default function ReferralPage() {
         <h2>🤝 邀请系统</h2>
         <p className="ref-desc">邀请好友游玩，他们挖矿时你自动获得收益（5级奖励链）</p>
         <div className="ref-link-box">
-          <input readOnly value={refLink} className="ref-link-input" />
+          <input readOnly value={`${window.location.origin}?ref=${address}`} className="ref-link-input" />
           <button className="copy-btn" onClick={copyLink}>📋 复制</button>
         </div>
       </div>
 
-      {msg && <div className="ref-section" style={{fontSize:'.82rem',color:msg.startsWith('✅')?'#52c462':'#f06070'}}>{msg}</div>}
+      {msg && (
+        <div style={{margin:'0 0 12px',padding:'8px 16px',fontSize:'.82rem',borderRadius:8,
+          color:msg.startsWith('✅')?'#52c462':'#f06070',
+          background:'#0a0818',border:'1px solid #1a1040'}}>
+          {msg}
+        </div>
+      )}
 
       {!isBound && (
         <div className="ref-section">
           <h3>绑定邀请人</h3>
           <div className="bind-row">
-            <input className="ref-input" placeholder="输入邀请人钱包地址 0x..." value={inputRef} onChange={e => setInputRef(e.target.value)} />
-            <button className="bind-btn" onClick={handleBind} disabled={busy}>{busy ? '处理中...' : '确认绑定'}</button>
+            <input className="ref-input" placeholder="输入邀请人钱包地址 0x..."
+              value={inputRef} onChange={e => setInputRef(e.target.value)} />
+            <button className="bind-btn" onClick={handleBind} disabled={busy}>
+              {busy ? '处理中...' : '确认绑定'}
+            </button>
           </div>
         </div>
       )}
@@ -115,9 +116,9 @@ export default function ReferralPage() {
         <h3>奖励率</h3>
         <div className="level-rates">
           {LEVEL_RATES.map((r, i) => (
-            <div key={i} className="level-rate-card" style={{ borderLeft: `3px solid ${LEVEL_COLORS[i]}` }}>
-              <span className="level-num">L{i + 1}</span>
-              <span className="level-rate">{rates[i] ? (Number(rates[i]) / 100).toFixed(1) + '%' : r}</span>
+            <div key={i} className="level-rate-card" style={{borderLeft:`3px solid ${LEVEL_COLORS[i]}`}}>
+              <span className="level-num">L{i+1}</span>
+              <span className="level-rate">{rates[i] ? (Number(rates[i])/100).toFixed(1)+'%' : r}</span>
             </div>
           ))}
         </div>
@@ -126,11 +127,11 @@ export default function ReferralPage() {
       <div className="ref-section">
         <h3>📊 累计获得的邀请收益</h3>
         <div className="earnings-grid">
-          {RESOURCE_TOKENS.map((_, i) => (
+          {RES_SYMS.map((sym, i) => (
             <div key={i} className="earning-card">
               <span className="earning-icon">{RESOURCE_ICONS[i]}</span>
-              <span className="earning-sym">{['GOLD','WOOD','HHO','FIRE','SIOO'][i]}</span>
-              <span className="earning-val">{parseFloat(formatEther(earnings[i] || 0n)).toFixed(4)}</span>
+              <span className="earning-sym">{sym}</span>
+              <span className="earning-val">{parseFloat(formatEther(earnings[i]||0n)).toFixed(4)}</span>
             </div>
           ))}
         </div>
