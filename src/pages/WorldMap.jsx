@@ -891,17 +891,20 @@ export default function WorldMap() {
             <div className="wm-sec">
               <div className="wm-sec-title">
                 使徒工作区 (APOSTLE WORKSPACE)
-                {isMe&&<button className="wm-btn-sm" onClick={()=>openPicker('apostle')}>＋ 放置</button>}
+                {/* 任何已铸造地块 + 已连钱包 都可以放置使徒 */}
+                {selOwner && address && <button className="wm-btn-sm" onClick={()=>openPicker('apostle')}>＋ 放置</button>}
               </div>
+              {!selOwner && <div className="wm-dim" style={{fontSize:'.78rem',padding:'4px 0'}}>地块需先铸造才能挖矿</div>}
               <div className="wm-slots">
                 {[0,1,2,3,4].map(i=>{const s=selSlots[i];
-                  // 每个槽位平均分配待领取的挖矿量（该使徒主元素对应资源）
                   const slotCnt = selSlots.length
                   const reward = (s && selRewards.length>0 && slotCnt>0)
                     ? (Number(selRewards[s.apoElem??0]) / slotCnt / 1e18).toFixed(2)
                     : null
+                  // 空槽位点击：已铸造+已连钱包才可点击放置
+                  const canPlace = selOwner && address
                   return(
-                  <div key={i} className={`wm-slot${s?' used':''}`} onClick={()=>(!s&&isMe)?openPicker('apostle'):null}>
+                  <div key={i} className={`wm-slot${s?' used':''}`} onClick={()=>(!s&&canPlace)?openPicker('apostle'):null}>
                     {s?(
                       <div className="wm-slot-inner">
                         <img src={APO_EGG_GIF} style={{width:36,height:36,filter:s.apoElem!=null?`hue-rotate(${s.apoElem*72}deg) saturate(1.5)`:''}}/>
@@ -909,9 +912,10 @@ export default function WorldMap() {
                         {reward&&<div className="wm-slot-rate" style={{color:ELEMS[s.apoElem??0]?.c}}>
                           <span>{ELEMS[s.apoElem??0]?.i}</span>{reward}
                         </div>}
-                        {isMe&&<button className="wm-slot-stop" onClick={e=>{e.stopPropagation();handleStopMining(sel,s.apostleId)}}>×</button>}
+                        {/* 停止挖矿：合约层限制只有放置者或地块owner可以停，这里都显示按钮让合约判断 */}
+                        {address&&<button className="wm-slot-stop" onClick={e=>{e.stopPropagation();handleStopMining(sel,s.apostleId)}}>×</button>}
                       </div>
-                    ):<div className="wm-slot-add">{isMe?'＋':'—'}</div>}
+                    ):<div className="wm-slot-add">{canPlace?'＋':'—'}</div>}
                   </div>
                 )})}
               </div>
