@@ -1,6 +1,6 @@
 // api/listings.js — Vercel Serverless Function
-// 事件索引：NFTAuction + 旧 LandAuction 的在售列表
-// 分段扫描解决 BSC RPC 50000块限制，内存缓存5分钟
+// 只扫最近 3 天区块（BSC 每3秒一块，3天≈86400块）
+// 活跃拍卖不可能在3天前挂上去还没成交，所以无需从创世块扫
 import { createPublicClient, http, parseAbiItem } from 'viem'
 
 const bscTestnet = {
@@ -15,8 +15,11 @@ const OLD_AUC  = '0xfACc3eaD5EA9Ec5F2fe56568918b21Fb3b899284'
 const APOSTLE  = '0xbBce394d561E67bA9C0720d3aD56b25bC12Ee4f0'
 const DRILL    = '0x782827AdA353d4f958964e1E10D5d940e4B38409'
 const LAND     = '0x889DCe5b3934D56f3814f93793F8e1f8710249ea'
-const DEPLOY_BLOCK = 97519000n
-const CHUNK = 45000n  // 低于 50000 的安全值
+
+// 拍卖时长最长30天，但大部分3天内成交
+// 扫7天确保覆盖所有活跃拍卖（7天 × 28800块/天 = 201600块，仍只需5个chunk）
+const SCAN_BLOCKS = 201600n  // ~7天
+const CHUNK = 45000n
 
 const E_NFT_CREATED   = parseAbiItem('event AuctionCreated(address indexed nft,uint256 indexed id,address seller,uint128 start,uint128 end,uint64 dur)')
 const E_NFT_WON       = parseAbiItem('event AuctionWon(address indexed nft,uint256 indexed id,address buyer,uint256 price)')
@@ -25,7 +28,6 @@ const E_OLD_CREATED   = parseAbiItem('event AuctionCreated(uint256 indexed id,ad
 const E_OLD_WON       = parseAbiItem('event AuctionWon(uint256 indexed id,address buyer,uint256 price)')
 const E_OLD_CANCELLED = parseAbiItem('event AuctionCancelled(uint256 indexed id)')
 
-// 分段扫描 getLogs（绕过50000块限制，动态获取最新区块）
 async function getLogsChunked(address, event, fromBlock, toBlock) {
   const logs = []
   for (let from = fromBlock; from <= toBlock; from += CHUNK) {
@@ -34,39 +36,38 @@ async function getLogsChunked(address, event, fromBlock, toBlock) {
       const chunk = await pc.getLogs({ address, event, fromBlock: from, toBlock: to })
       logs.push(...chunk)
     } catch(e) {
-      console.error(`getLogs chunk ${from}-${to} error:`, e.message?.slice(0,80))
+      console.error(`getLogs ${from}-${to}: ${e.message?.slice(0,60)}`)
     }
   }
   return logs
 }
 
-// 内存缓存
+// 内存缓存（Serverless 实例存活期间有效）
 let cache = null
 let cacheTime = 0
-const TTL = 5 * 60 * 1000  // 5分钟
+const TTL = 3 * 60 * 1000  // 3分钟（短一点，让数据更新更及时）
 
 async function fetchListings() {
   const now = Date.now()
   if (cache && now - cacheTime < TTL) return cache
 
-  // 动态获取最新区块（不依赖硬编码）
-  const latestBlock = await pc.getBlockNumber()
-  const fromBlock = DEPLOY_BLOCK
+  const latest = await pc.getBlockNumber()
+  // 只扫最近7天，不从创世块扫
+  const DEPLOY_BLOCK = 97519000n
+  const fromBlock = latest > SCAN_BLOCKS ? latest - SCAN_BLOCKS : DEPLOY_BLOCK
+  const actualFrom = fromBlock < DEPLOY_BLOCK ? DEPLOY_BLOCK : fromBlock
 
-  console.log(`Scanning blocks ${fromBlock} to ${latestBlock} (${latestBlock - fromBlock} blocks, ${Math.ceil(Number(latestBlock - fromBlock) / Number(CHUNK))} chunks)`)
+  const chunks = Math.ceil(Number(latest - actualFrom) / Number(CHUNK))
+  console.log(`Scanning last ${Number(latest - actualFrom)} blocks (${chunks} chunks)`)
 
-  // 并行扫描 NFTAuction 和旧合约
   const [nftCreated, nftWon, nftCancelled, oldCreated, oldWon, oldCancelled] = await Promise.all([
-    getLogsChunked(NFT_AUC, E_NFT_CREATED,   fromBlock, latestBlock),
-    getLogsChunked(NFT_AUC, E_NFT_WON,       fromBlock, latestBlock),
-    getLogsChunked(NFT_AUC, E_NFT_CANCELLED, fromBlock, latestBlock),
-    getLogsChunked(OLD_AUC, E_OLD_CREATED,   fromBlock, latestBlock),
-    getLogsChunked(OLD_AUC, E_OLD_WON,       fromBlock, latestBlock),
-    getLogsChunked(OLD_AUC, E_OLD_CANCELLED, fromBlock, latestBlock),
+    getLogsChunked(NFT_AUC, E_NFT_CREATED,   actualFrom, latest),
+    getLogsChunked(NFT_AUC, E_NFT_WON,       actualFrom, latest),
+    getLogsChunked(NFT_AUC, E_NFT_CANCELLED, actualFrom, latest),
+    getLogsChunked(OLD_AUC, E_OLD_CREATED,   actualFrom, latest),
+    getLogsChunked(OLD_AUC, E_OLD_WON,       actualFrom, latest),
+    getLogsChunked(OLD_AUC, E_OLD_CANCELLED, actualFrom, latest),
   ])
-
-  console.log(`NFT events: created=${nftCreated.length} won=${nftWon.length} cancelled=${nftCancelled.length}`)
-  console.log(`OLD events: created=${oldCreated.length} won=${oldWon.length} cancelled=${oldCancelled.length}`)
 
   // NFTAuction 活跃挂单
   const nftSold = new Set(nftWon.map(e => e.args.nft?.toLowerCase() + '_' + String(e.args.id)))
@@ -87,8 +88,8 @@ async function fetchListings() {
     landIds:    nftActive.filter(e => e.args.nft?.toLowerCase() === LAND.toLowerCase()).map(e => Number(e.args.id)),
     oldLandIds: oldActive.map(e => Number(e.args.id)),
     scannedAt:  now,
-    latestBlock: Number(latestBlock),
-    totalChunks: Math.ceil(Number(latestBlock - fromBlock) / Number(CHUNK)),
+    fromBlock:  Number(actualFrom),
+    toBlock:    Number(latest),
   }
 
   console.log(`Active: apostles=${result.apostleIds.length} drills=${result.drillIds.length} lands=${result.landIds.length + result.oldLandIds.length}`)
@@ -98,11 +99,11 @@ async function fetchListings() {
   return result
 }
 
-// Vercel Serverless Handler
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
+  // CDN 缓存3分钟，过期后最多等60秒的 stale 响应
+  res.setHeader('Cache-Control', 's-maxage=180, stale-while-revalidate=60')
   if (req.method === 'OPTIONS') { res.status(200).end(); return }
   if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return }
   try {
