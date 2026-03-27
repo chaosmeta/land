@@ -1,13 +1,7 @@
-// api/lands.js — 土地数据索引（快速版）
-// 直接 multicall 读60块已知土地的属性，不扫 Transfer 事件
-// 土地不会增减（固定60块），只需读属性即可
+// api/lands.js — 土地数据索引（扫全部已铸造土地）
 import { createPublicClient, http } from 'viem'
+import { bscTestnet } from 'viem/chains'
 
-const bscTestnet = {
-  id: 97, name: 'BSC Testnet',
-  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-  rpcUrls: { default: { http: ['https://bsc-testnet-rpc.publicnode.com'] } },
-}
 const pc = createPublicClient({ chain: bscTestnet, transport: http('https://bsc-testnet-rpc.publicnode.com') })
 
 const LAND   = '0x889DCe5b3934D56f3814f93793F8e1f8710249ea'
@@ -21,9 +15,10 @@ const MINING_ABI = [
   { type:'function', name:'slotCount', inputs:[{name:'landId',type:'uint256'}], outputs:[{type:'uint256'}], stateMutability:'view' },
 ]
 
-// 已知的60块土地ID（x=0-11, y=0-4，即id=x*100+y+1）
-const LAND_IDS = []
-for (let x = 0; x < 12; x++) for (let y = 0; y < 5; y++) LAND_IDS.push(x * 100 + y + 1)
+// 动态扫描所有已铸造土地（x=0-39, y=0-9，覆盖所有已知铸造区域）
+// 扫描范围比实际铸造范围大一些，ownerOf != 零地址的才算铸造
+const SCAN_IDS = []
+for (let x = 0; x < 40; x++) for (let y = 0; y < 10; y++) SCAN_IDS.push(x * 100 + y + 1)
 
 let cache = null, cacheTime = 0
 const TTL = 5 * 60 * 1000  // 5分钟
@@ -32,28 +27,29 @@ async function fetchLands() {
   const now = Date.now()
   if (cache && now - cacheTime < TTL) return cache
 
-  // 一次 multicall 读所有土地属性（60个）
-  const [raRes, ownerRes, slotRes] = await Promise.all([
-    pc.multicall({
-      contracts: LAND_IDS.map(id => ({ address: LAND, abi: LAND_ABI, functionName: 'resourceAttr', args: [BigInt(id)] })),
-      allowFailure: true
-    }),
-    pc.multicall({
-      contracts: LAND_IDS.map(id => ({ address: LAND, abi: LAND_ABI, functionName: 'ownerOf', args: [BigInt(id)] })),
-      allowFailure: true
-    }),
-    pc.multicall({
-      contracts: LAND_IDS.map(id => ({ address: MINING, abi: MINING_ABI, functionName: 'slotCount', args: [BigInt(id)] })),
-      allowFailure: true
-    }),
-  ])
+  const BATCH = 100
+  const allOwners = [], allAttrs = [], allSlots = []
+
+  // 分批 multicall
+  for (let i = 0; i < SCAN_IDS.length; i += BATCH) {
+    const batch = SCAN_IDS.slice(i, i + BATCH)
+    const [ownerRes, raRes, slotRes] = await Promise.all([
+      pc.multicall({ contracts: batch.map(id => ({ address: LAND, abi: LAND_ABI, functionName: 'ownerOf', args: [BigInt(id)] })), allowFailure: true }),
+      pc.multicall({ contracts: batch.map(id => ({ address: LAND, abi: LAND_ABI, functionName: 'resourceAttr', args: [BigInt(id)] })), allowFailure: true }),
+      pc.multicall({ contracts: batch.map(id => ({ address: MINING, abi: MINING_ABI, functionName: 'slotCount', args: [BigInt(id)] })), allowFailure: true }),
+    ])
+    allOwners.push(...ownerRes)
+    allAttrs.push(...raRes)
+    allSlots.push(...slotRes)
+  }
 
   const lands = []
-  LAND_IDS.forEach((id, i) => {
-    const owner = ownerRes[i]?.result
+  SCAN_IDS.forEach((id, i) => {
+    const owner = allOwners[i]?.result
+    // 只有 ownerOf 返回非零地址才算已铸造
     if (!owner || owner === '0x0000000000000000000000000000000000000000') return
-    const ra = raRes[i]?.result ?? 0n
-    const sl = Number(slotRes[i]?.result ?? 0n)
+    const ra = allAttrs[i]?.result ?? 0n
+    const sl = Number(allSlots[i]?.result ?? 0n)
     const b = BigInt(ra)
     const resources = [
       Number(b & 0xffffn),
@@ -74,7 +70,6 @@ async function fetchLands() {
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
-  // CDN 缓存5分钟，stale-while-revalidate 后台刷新
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=120')
   if (req.method === 'OPTIONS') { res.status(200).end(); return }
   try {
