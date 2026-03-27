@@ -15,10 +15,9 @@ const MINING_ABI = [
   { type:'function', name:'slotCount', inputs:[{name:'landId',type:'uint256'}], outputs:[{type:'uint256'}], stateMutability:'view' },
 ]
 
-// 动态扫描所有已铸造土地（x=0-39, y=0-9，覆盖所有已知铸造区域）
-// 扫描范围比实际铸造范围大一些，ownerOf != 零地址的才算铸造
+// 扫描全部地图 100x100=10000格，ownerOf != 零地址的才算已铸造
 const SCAN_IDS = []
-for (let x = 0; x < 40; x++) for (let y = 0; y < 10; y++) SCAN_IDS.push(x * 100 + y + 1)
+for (let x = 0; x < 100; x++) for (let y = 0; y < 100; y++) SCAN_IDS.push(x * 100 + y + 1)
 
 let cache = null, cacheTime = 0
 const TTL = 5 * 60 * 1000  // 5分钟
