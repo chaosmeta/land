@@ -64,3 +64,5 @@
 .bb-asset-name{font-size:.9rem;font-weight:700;color:#d4a8ff;margin-bottom:.2rem}
 .bb-asset-desc{font-size:.7rem;color:#5040a0;margin-bottom:.3rem}
 .bb-asset-price{font-size:.8rem;color:#9080b0}
+
+/* ConfigModal */.cfg-modal{min-width:320px;max-width:480px;max-height:80vh;overflow-y:auto}.cfg-slots{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}.cfg-slot-row{display:flex;align-items:center;gap:8px;background:#0a0818;border:1px solid #1a1040;border-radius:8px;padding:7px 10px}.cfg-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px;margin-bottom:8px}.cfg-pick-item{display:flex;flex-direction:column;align-items:center;gap:3px;background:#0a0818;border:1px solid #2a1a5a;border-radius:8px;padding:8px 4px;cursor:pointer;transition:all .15s}.cfg-pick-item:hover{border-color:#6040b0;background:#120a28;transform:translateY(-1px)}.as-btn-xs{padding:3px 7px;font-size:.66rem;border-radius:5px;cursor:pointer;border:none;font-weight:600}.as-btn-xs.as-btn-danger{background:#3a0a1a;color:#f06070;border:1px solid #6a1a2a}

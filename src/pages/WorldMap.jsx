@@ -56,14 +56,14 @@ const LAND_META_ABI = [
 // ─── 白皮书颜色 — 每种状态5色调色板做像素纹理 ──────────────────────────────
 // [底色, 亮色1, 暗色1, 亮色2, 暗色2]
 const PAL = {
-  MY:      ['#ff9900','#ffb830','#cc7700','#ffcc55','#aa5500'],  // 我的（橙）
-  MY_AUC:  ['#ff3344','#ff6677','#cc1122','#ff5566','#990011'],  // 我的拍卖（红）
-  GENESIS: ['#44aa33','#70d055','#228811','#60c045','#116600'],  // 首次售卖（绿）
-  RESERVE: ['#11bbaa','#44ddd0','#009988','#33ccbb','#007766'],  // 保留地（青）
-  OWNED:   ['#cc3344','#ee5566','#aa1122','#dd4455','#880011'],  // 有主（红）
-  MINE:    ['#dd6611','#ff9944','#aa4400','#ee7722','#883300'],  // 挖矿中（深橙）
-  ONSALE:  ['#117744','#33aa66','#005522','#22994d','#003311'],  // 拍卖中（深绿）
-  MYSTIC:  ['#7722bb','#aa55ee','#551199','#9944cc','#330077'],  // 神秘（紫）
+  MY:      ['#ffaa00','#ffdd44','#dd7700','#ffcc22','#cc5500'],
+  MY_AUC:  ['#ff2244','#ff5577','#cc0022','#ff4466','#990011'],
+  GENESIS: ['#44dd33','#88ff55','#22aa11','#66ee33','#119900'],
+  RESERVE: ['#00ddcc','#44ffee','#00aaaa','#22eedd','#008888'],
+  OWNED:   ['#6644aa','#8866cc','#443388','#7755bb','#332266'],
+  MINE:    ['#ff8800','#ffaa33','#cc6600','#ff9911','#aa4400'],
+  ONSALE:  ['#22aa55','#44cc77','#118833','#33bb66','#006622'],
+  MYSTIC:  ['#9922dd','#bb55ff','#661199','#aa33ee','#440077'],
 }
 // 5元素调色板 — 金木水火土，用于地块着色（原版风格）
 const EPALS = [
@@ -334,34 +334,36 @@ export default function WorldMap() {
     load(); return()=>{dead=true}
   },[pc])
 
-  // 自动聚焦到已铸造区域中心（cvSize有效且有数据时触发一次）
+  // 自动聚焦：优先聚焦到玩家自己的地块，否则聚焦到全部已铸造区域
   useEffect(()=>{
     const ownIds=Object.keys(owners)
     const W=cvSize.w, H=cvSize.h
     if(ownIds.length>0 && W>200 && H>200 && !focusedR.current){
       focusedR.current=true
-      const ids=ownIds.map(Number)
-      // id = col*ROWS + row + 1, ROWS=100
-      const cols=ids.map(id=>Math.floor((id-1)/ROWS))
-      const rows=ids.map(id=>(id-1)%ROWS)
+      // 优先用玩家自己的地块
+      const myIds = address
+        ? ownIds.map(Number).filter(id => owners[id]?.toLowerCase()===address.toLowerCase())
+        : []
+      const focusIds = myIds.length>0 ? myIds : ownIds.map(Number)
+      const cols=focusIds.map(id=>Math.floor((id-1)/ROWS))
+      const rows=focusIds.map(id=>(id-1)%ROWS)
       const minC=Math.min(...cols), maxC=Math.max(...cols)
       const minR=Math.min(...rows), maxR=Math.max(...rows)
-      const spanC=maxC-minC+1, spanR=Math.max(maxR-minR+1,1)
-      // 选一个能让区域占画布 60% 左右的缩放级别
-      const zByW = W*0.6/(spanC*CELL)
-      const zByH = (H-60)*0.6/(spanR*CELL)
-      const z = Math.max(2, Math.min(MAX_Z, Math.floor(Math.min(zByW, zByH))))
-      // 已铸造区域中心像素坐标
+      const spanC=Math.max(maxC-minC+1,1), spanR=Math.max(maxR-minR+1,1)
+      // 玩家地块少时，给一个更近的缩放（让格子清晰可辨）
+      const zByW = W*0.7/(spanC*CELL)
+      const zByH = (H-60)*0.7/(spanR*CELL)
+      const minZ = myIds.length>0 && myIds.length<20 ? 4 : 2
+      const z = Math.max(minZ, Math.min(MAX_Z, Math.floor(Math.min(zByW, zByH))))
       const centerX = (minC + spanC/2) * CELL
       const centerY = (minR + spanR/2) * CELL
-      // pan = 中心坐标 - 视口一半（让中心落在屏幕中央）
       const px = centerX - W/(2*z)
       const py = centerY - (H-60)/(2*z)
       zoomRef.current=z; _setZoom(z)
       panRef.current={x:Math.max(0,px), y:Math.max(0,py)}
       dirtyRef.current=true
     }
-  },[owners, cvSize])
+  },[owners, cvSize, address])
 
   // 选中地块 slots/rewards
   useEffect(()=>{

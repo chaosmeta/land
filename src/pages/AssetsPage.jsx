@@ -287,7 +287,221 @@ function TokenTab({pc, address, wc}){
   )
 }
 
-// ── Land Tab（含转移）────────────────────────────────────────────────────
+// ── 配置弹窗：选择使徒+钻头放到土地上挖矿 ──────────────────────────────
+const APO_FULL_ABI=[
+  {type:'function',name:'attrs',inputs:[{name:'id',type:'uint256'}],outputs:[{name:'strength',type:'uint8'},{name:'element',type:'uint8'}],stateMutability:'view'},
+  {type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'},
+  {type:'function',name:'nextId',inputs:[],outputs:[{type:'uint256'}],stateMutability:'view'},
+  {type:'function',name:'isApprovedForAll',inputs:[{name:'owner',type:'address'},{name:'op',type:'address'}],outputs:[{type:'bool'}],stateMutability:'view'},
+  {type:'function',name:'setApprovalForAll',inputs:[{name:'op',type:'address'},{name:'v',type:'bool'}],outputs:[],stateMutability:'nonpayable'},
+]
+const DRL_FULL_ABI=[
+  {type:'function',name:'attrs',inputs:[{name:'id',type:'uint256'}],outputs:[{name:'tier',type:'uint8'},{name:'affinity',type:'uint8'}],stateMutability:'view'},
+  {type:'function',name:'ownerOf',inputs:[{name:'id',type:'uint256'}],outputs:[{type:'address'}],stateMutability:'view'},
+  {type:'function',name:'nextId',inputs:[],outputs:[{type:'uint256'}],stateMutability:'view'},
+  {type:'function',name:'isApprovedForAll',inputs:[{name:'owner',type:'address'},{name:'op',type:'address'}],outputs:[{type:'bool'}],stateMutability:'view'},
+  {type:'function',name:'setApprovalForAll',inputs:[{name:'op',type:'address'},{name:'v',type:'bool'}],outputs:[],stateMutability:'nonpayable'},
+]
+const MINING_FULL_ABI=[
+  {type:'function',name:'slotCount',inputs:[{name:'l',type:'uint256'}],outputs:[{type:'uint256'}],stateMutability:'view'},
+  {type:'function',name:'slots',inputs:[{name:'l',type:'uint256'},{name:'i',type:'uint256'}],outputs:[{name:'apostleId',type:'uint256'},{name:'drillId',type:'uint256'},{name:'startTime',type:'uint256'},{name:'placer',type:'address'},{name:'isOwnerSlot',type:'bool'}],stateMutability:'view'},
+  {type:'function',name:'MAX_APOSTLES_PER_LAND',inputs:[],outputs:[{type:'uint256'}],stateMutability:'view'},
+  {type:'function',name:'startMining',inputs:[{name:'landId',type:'uint256'},{name:'apostleId',type:'uint256'},{name:'drillId',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
+  {type:'function',name:'stopMining',inputs:[{name:'l',type:'uint256'},{name:'apostleId',type:'uint256'}],outputs:[],stateMutability:'nonpayable'},
+]
+
+function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
+  const [step, setStep] = useState('loading') // loading | slots | pickApo | pickDrill
+  const [slots, setSlots] = useState([])
+  const [myApos, setMyApos] = useState([])
+  const [myDrills, setMyDrills] = useState([])
+  const [selApo, setSelApo] = useState(null)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // 加载当前槽位 + 我的使徒钻头
+  useEffect(() => {
+    if (!pc || !address) return
+    let dead = false
+    async function load() {
+      setStep('loading')
+      try {
+        // 读槽位
+        const cnt = Number(await pc.readContract({address:CONTRACTS.mining,abi:MINING_FULL_ABI,functionName:'slotCount',args:[BigInt(landId)]}))
+        const slotArr = []
+        for (let i=0; i<cnt; i++) {
+          const s = await pc.readContract({address:CONTRACTS.mining,abi:MINING_FULL_ABI,functionName:'slots',args:[BigInt(landId),BigInt(i)]})
+          let apoElem=0,apoStr=50,drlTier=1,drlElem=0
+          if(s[0]>0n){try{const a=await pc.readContract({address:CONTRACTS.apostle,abi:APO_FULL_ABI,functionName:'attrs',args:[s[0]]});apoStr=Number(a[0]);apoElem=Number(a[1])}catch{}}
+          if(s[1]>0n){try{const d=await pc.readContract({address:CONTRACTS.drill,abi:DRL_FULL_ABI,functionName:'attrs',args:[s[1]]});drlTier=Number(d[0]);drlElem=Number(d[1])}catch{}}
+          slotArr.push({apostleId:s[0],drillId:s[1],apoStr,apoElem,drlTier,drlElem,isOwnerSlot:s[4]})
+        }
+        if (!dead) setSlots(slotArr)
+        // 读我的使徒
+        const apoNext = Number(await pc.readContract({address:CONTRACTS.apostle,abi:APO_FULL_ABI,functionName:'nextId'}))
+        const apoIds=[], BATCH=50
+        for(let s=1;s<apoNext;s+=BATCH){
+          const ids=Array.from({length:Math.min(BATCH,apoNext-s)},(_,i)=>s+i)
+          const res=await pc.multicall({contracts:ids.map(id=>({address:CONTRACTS.apostle,abi:APO_FULL_ABI,functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
+          ids.forEach((id,i)=>{if(res[i]?.result?.toLowerCase()===address.toLowerCase())apoIds.push(id)})
+        }
+        if(apoIds.length>0){
+          const attrRes=await pc.multicall({contracts:apoIds.map(id=>({address:CONTRACTS.apostle,abi:APO_FULL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true})
+          const list=apoIds.map((id,i)=>({id,strength:attrRes[i]?.result?Number(attrRes[i].result[0]):30,elem:attrRes[i]?.result?Number(attrRes[i].result[1]):0}))
+          list.sort((a,b)=>b.strength-a.strength)
+          if(!dead) setMyApos(list)
+        }
+        // 读我的钻头
+        const drlNext = Number(await pc.readContract({address:CONTRACTS.drill,abi:DRL_FULL_ABI,functionName:'nextId'}))
+        const drlIds=[]
+        for(let s=1;s<drlNext;s+=BATCH){
+          const ids=Array.from({length:Math.min(BATCH,drlNext-s)},(_,i)=>s+i)
+          const res=await pc.multicall({contracts:ids.map(id=>({address:CONTRACTS.drill,abi:DRL_FULL_ABI,functionName:'ownerOf',args:[BigInt(id)]})),allowFailure:true})
+          ids.forEach((id,i)=>{if(res[i]?.result?.toLowerCase()===address.toLowerCase())drlIds.push(id)})
+        }
+        if(drlIds.length>0){
+          const attrRes=await pc.multicall({contracts:drlIds.map(id=>({address:CONTRACTS.drill,abi:DRL_FULL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true})
+          const list=drlIds.map((id,i)=>({id,tier:attrRes[i]?.result?Number(attrRes[i].result[0]):1,elem:attrRes[i]?.result?Number(attrRes[i].result[1]):0}))
+          list.sort((a,b)=>b.tier-a.tier)
+          if(!dead) setMyDrills(list)
+        }
+        if(!dead) setStep('slots')
+      } catch(e) { if(!dead){setMsg('加载失败: '+e.message); setStep('slots')} }
+    }
+    load()
+    return ()=>{dead=true}
+  }, [landId, pc, address])
+
+  async function handlePlace(apo, drl) {
+    if(!wc) return
+    setBusy(true); setMsg('检查授权...')
+    try {
+      // 授权使徒
+      const apoAppr = await pc.readContract({address:CONTRACTS.apostle,abi:APO_FULL_ABI,functionName:'isApprovedForAll',args:[address,CONTRACTS.mining]}).catch(()=>false)
+      if(!apoAppr){
+        setMsg('授权使徒...')
+        const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:APO_FULL_ABI,functionName:'setApprovalForAll',args:[CONTRACTS.mining,true]})})
+        await pc.waitForTransactionReceipt({hash:h})
+      }
+      // 如果带钻头，授权钻头
+      if(drl){
+        const drlAppr = await pc.readContract({address:CONTRACTS.drill,abi:DRL_FULL_ABI,functionName:'isApprovedForAll',args:[address,CONTRACTS.mining]}).catch(()=>false)
+        if(!drlAppr){
+          setMsg('授权钻头...')
+          const h=await wc.sendTransaction({to:CONTRACTS.drill,data:encodeFunctionData({abi:DRL_FULL_ABI,functionName:'setApprovalForAll',args:[CONTRACTS.mining,true]})})
+          await pc.waitForTransactionReceipt({hash:h})
+        }
+      }
+      setMsg(drl ? `放置使徒#${apo.id}+钻头#${drl.id}...` : `放置使徒#${apo.id}...`)
+      const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_FULL_ABI,functionName:'startMining',args:[BigInt(landId),BigInt(apo.id),drl?BigInt(drl.id):0n]})})
+      await pc.waitForTransactionReceipt({hash:h})
+      setMsg('✅ 放置成功！')
+      setTimeout(()=>{onDone?.();onClose()},1200)
+    } catch(e){ setMsg('❌ '+(e.shortMessage||e.message)) }
+    setBusy(false)
+  }
+
+  async function handleStop(apostleId) {
+    if(!wc) return
+    setBusy(true); setMsg('停止挖矿...')
+    try {
+      const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_FULL_ABI,functionName:'stopMining',args:[BigInt(landId),apostleId]})})
+      await pc.waitForTransactionReceipt({hash:h})
+      setMsg('✅ 已停止')
+      setTimeout(()=>{onDone?.();onClose()},1200)
+    } catch(e){ setMsg('❌ '+(e.shortMessage||e.message)) }
+    setBusy(false)
+  }
+
+  return (
+    <div className="as-sell-overlay" onClick={onClose}>
+      <div className="as-sell-modal cfg-modal" onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <div style={{fontWeight:700,color:'#c090ff',fontSize:'.95rem'}}>⚙️ 配置土地 #{landId}</div>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'#7060a0',fontSize:'1.1rem',cursor:'pointer'}}>✕</button>
+        </div>
+
+        {step==='loading' && <div className="as-loading"><span className="as-spin"/>加载中...</div>}
+
+        {step!=='loading' && (
+          <>
+            {/* 当前槽位 */}
+            <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>当前工作区 ({slots.length} 个使徒)</div>
+            {slots.length===0
+              ? <div style={{fontSize:'.78rem',color:'#3a2a6a',padding:'8px 0',marginBottom:8}}>暂无使徒在挖矿</div>
+              : <div className="cfg-slots">
+                {slots.map((s,i)=>(
+                  <div key={i} className="cfg-slot-row">
+                    <img src={APO_EGG_GIF} style={{width:28,height:28,filter:`hue-rotate(${s.apoElem*72}deg) saturate(1.4)`}}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:'.75rem',color:'#c090ff'}}>使徒 #{s.apostleId.toString()} <span style={{color:ELEMS[s.apoElem].color}}>力量{s.apoStr}</span></div>
+                      {s.drillId>0n && <div style={{fontSize:'.68rem',color:ELEMS[s.drlElem].color}}>⛏️ 钻头#{s.drillId.toString()} {'★'.repeat(s.drlTier)}</div>}
+                      {s.isOwnerSlot && <div style={{fontSize:'.62rem',color:'#f0c040'}}>⭐ 地主槽</div>}
+                    </div>
+                    <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(s.apostleId)} disabled={busy}>停止</button>
+                  </div>
+                ))}
+              </div>
+            }
+
+            <div style={{borderTop:'1px solid #1a1040',margin:'10px 0'}}/>
+
+            {/* 选择使徒放置 */}
+            {step==='slots' && (
+              <>
+                <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>放置新使徒（{myApos.length} 个可用）</div>
+                {myApos.length===0
+                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>钱包中无使徒，去市场或盲盒购买</div>
+                  : <div className="cfg-pick-grid">
+                    {myApos.slice(0,20).map(a=>(
+                      <div key={a.id} className="cfg-pick-item" onClick={()=>{setSelApo(a);setStep('pickDrill')}}
+                        style={{borderColor:ELEMS[a.elem].color+'44'}}>
+                        <img src={APO_EGG_GIF} style={{width:32,height:32,filter:`hue-rotate(${a.elem*72}deg) saturate(1.4)`}}/>
+                        <div style={{fontSize:'.68rem',color:'#c090ff'}}>#{ a.id}</div>
+                        <div style={{fontSize:'.65rem',color:ELEMS[a.elem].color}}>力{a.strength}</div>
+                      </div>
+                    ))}
+                  </div>
+                }
+              </>
+            )}
+
+            {/* 选择钻头 */}
+            {step==='pickDrill' && selApo && (
+              <>
+                <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>
+                  已选使徒 #{selApo.id}，选配钻头（可跳过）
+                </div>
+                <button style={{width:'100%',padding:'.4rem',background:'#1a2a1a',border:'1px solid #2a5a2a',borderRadius:7,color:'#52c462',fontSize:'.8rem',cursor:'pointer',marginBottom:8}}
+                  onClick={()=>handlePlace(selApo,null)} disabled={busy}>
+                  ⚡ 不带钻头，直接放置
+                </button>
+                {myDrills.length===0
+                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>钱包中无钻头</div>
+                  : <div className="cfg-pick-grid">
+                    {myDrills.slice(0,20).map(d=>(
+                      <div key={d.id} className="cfg-pick-item" onClick={()=>handlePlace(selApo,d)} style={{borderColor:ELEMS[d.elem].color+'44'}}>
+                        <img src={drillImgUrl(d.elem,d.tier)} style={{width:32,height:32,objectFit:'contain'}}/>
+                        <div style={{fontSize:'.68rem',color:'#c090ff'}}>#{d.id}</div>
+                        <div style={{fontSize:'.65rem',color:ELEMS[d.elem].color}}>{'★'.repeat(d.tier)}</div>
+                      </div>
+                    ))}
+                  </div>
+                }
+                <button style={{marginTop:8,background:'none',border:'none',color:'#5040a0',fontSize:'.75rem',cursor:'pointer',textDecoration:'underline'}}
+                  onClick={()=>setStep('slots')}>← 重新选使徒</button>
+              </>
+            )}
+
+            {msg && <div style={{fontSize:'.78rem',marginTop:10,padding:'6px 10px',borderRadius:6,background:'#0a0818',color:msg.startsWith('✅')?'#52c462':'#f06070',border:`1px solid ${msg.startsWith('✅')?'#1a4a2a':'#4a1a2a'}`}}>{msg}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Land Tab（含转移 + 配置）─────────────────────────────────────────────
 function LandTab({pc,address,wc}){
   const [lands,setLands]=useState([])
   const [loading,setLoading]=useState(true)
@@ -295,6 +509,7 @@ function LandTab({pc,address,wc}){
   const [sellModal,setSellModal]=useState(null)
   const [sellPrice,setSellPrice]=useState('5')
   const [transferId,setTransferId]=useState(null)
+  const [configId,setConfigId]=useState(null)
 
   const load=useCallback(async()=>{
     if(!address||!pc){setLoading(false);return}
@@ -369,6 +584,10 @@ function LandTab({pc,address,wc}){
         <TransferModal type="nft" title={`土地 #${transferId}`} tokenContract={CONTRACTS.land} tokenId={transferId}
           address={address} wc={wc} pc={pc} onClose={()=>setTransferId(null)} onDone={()=>{setTransferId(null);load()}}/>
       )}
+      {configId!=null&&(
+        <ConfigModal landId={configId} pc={pc} address={address} wc={wc}
+          onClose={()=>setConfigId(null)} onDone={()=>{setConfigId(null);load()}}/>
+      )}
       <div className="as-nft-grid">
         {lands.map(l=>{
           const vals=decodeAttr(l.resourceAttr),maxV=Math.max(1,...vals)
@@ -386,6 +605,7 @@ function LandTab({pc,address,wc}){
                     :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖</button>
                   }
                   {!l.inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(l.id)}>📤 转移</button>}
+                  <button className="as-btn-sm" style={{background:'#1a1a40',border:'1px solid #3a2a6a',color:'#a080d0',borderRadius:6,padding:'4px 8px',fontSize:'.72rem',cursor:'pointer'}} onClick={()=>setConfigId(l.id)}>⚙️ 配置</button>
                 </div>
               </div>
             </div>
