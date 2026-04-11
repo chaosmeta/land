@@ -4,8 +4,17 @@ const GH = 'https://raw.githubusercontent.com/evolutionlandorg/evo-frontend/main
 // 使徒孵化器 GIF（蛋）
 export const APO_EGG_GIF = `${GH}/apostle/egg.gif`
 
-// 使徒成体 GIF — 成年后显示此图，加 hue-rotate 区分元素
-export const APO_ADULT_GIF = `${GH}/apostle/apostle.gif`
+// 使徒成体图 — 用 DiceBear API 按 id+element+gender 生成唯一角色头像
+// style: adventurer(女性风) / adventurer-neutral(中性) / big-smile(活泼) / bottts(机器人)
+const ELEM_STYLES = ['pixel-art', 'adventurer', 'big-smile', 'bottts', 'adventurer-neutral']
+const ELEM_BG = ['f0c040', '52c462', '40a0f0', 'f05030', 'c08040'] // 金木水火土背景色
+
+export function apostleImgUrl(id, element, gender) {
+  const style = ELEM_STYLES[element % ELEM_STYLES.length]
+  const bg = ELEM_BG[element % ELEM_BG.length]
+  const seed = `apostle-${id}-${element}-${gender}`
+  return `https://api.dicebear.com/7.x/${style}/svg?seed=${seed}&backgroundColor=${bg}&backgroundType=solid`
+}
 
 // 钻头图片: class(0-2) x lv(1-5)
 export function drillImgUrl(elem, tier) {
