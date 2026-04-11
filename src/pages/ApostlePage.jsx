@@ -4,7 +4,7 @@ import { usePublicClient, useAccount, useWalletClient } from '../contexts/Wallet
 import { useLang } from '../contexts/LangContext.jsx'
 import { formatEther, encodeFunctionData } from 'viem'
 import { CONTRACTS } from '../constants/contracts'
-import { APO_EGG_GIF, APO_ADULT_GIF, ELEM_SVGS, ELEMS } from '../constants/images'
+import { APO_EGG_GIF, apostleImgUrl, ELEM_SVGS, ELEMS } from '../constants/images'
 import './ApostlePage.css'
 
 const APO_ABI = [
@@ -27,12 +27,28 @@ function fmtTime(ts,lang){const t=Number(ts);if(t===0)return lang==='zh'?'无':'
 function timeLeft(ts){const left=Number(ts)*1000-Date.now();if(left<=0)return null;const h=Math.floor(left/3600000),m=Math.floor(left%3600000/60000);return h>0?`${h}h${m}m`:`${m}m`}
 function ElemIcon({i,size=14}){return <img src={ELEM_SVGS[i]} alt={ELEMS[i].key} style={{width:size,height:size,verticalAlign:'middle'}}/>}
 
-// 成体/蛋 图片组件 — 核心修复：isAdult=true 时切换成体图
-function ApostleImg({apo,size=80,style={}}){
-  const [err,setErr]=useState(false)
-  const hue=`hue-rotate(${apo.element*72}deg) saturate(1.6) brightness(1.1)`
-  if(!apo.isAdult) return <img src={APO_EGG_GIF} alt="egg" style={{width:size,height:size,opacity:.75,...style}}/>
-  return <img src={err?APO_EGG_GIF:APO_ADULT_GIF} alt="apostle" onError={()=>setErr(true)} style={{width:size,height:size,filter:hue,...style}}/>
+// ── 使徒图片组件 ──────────────────────────────────────────────────────────
+// 孵化中 → egg.gif（半透明）
+// 已成年 → DiceBear API 按 id+element+gender 生成唯一SVG头像，每个使徒外观不同
+function ApostleImg({apo, size=80, style={}}){
+  const [err, setErr] = useState(false)
+  if (!apo.isAdult) {
+    return (
+      <img src={APO_EGG_GIF} alt="egg"
+        style={{width:size, height:size, opacity:.75, ...style}}/>
+    )
+  }
+  const src = err ? APO_EGG_GIF : apostleImgUrl(apo.id, apo.element, apo.gender)
+  return (
+    <img src={src} alt={`apostle-${apo.id}`}
+      onError={()=>setErr(true)}
+      style={{
+        width:size, height:size,
+        borderRadius: style.borderRadius ?? '50%',
+        background: ELEMS[apo.element].color+'22',
+        ...style
+      }}/>
+  )
 }
 
 function ApostleCard({apo,isMe,onBreed,onDetail,lang}){
@@ -41,7 +57,7 @@ function ApostleCard({apo,isMe,onBreed,onDetail,lang}){
   return(
     <div className="ap-card" onClick={()=>onDetail&&onDetail(apo)} style={{borderColor:isMe?(adult?GENDER_COLOR[apo.gender]+'88':'#7040c088'):'#2a1a40'}}>
       <div className="ap-card-img-wrap" style={{background:`linear-gradient(135deg,${ELEMS[apo.element].color}22,#0a0814)`}}>
-        <ApostleImg apo={apo} size={72} style={{borderRadius:8}}/>
+        <ApostleImg apo={apo} size={72} style={{borderRadius:adult?'50%':8}}/>
         {!adult&&<div className="ap-growth-bar"><div style={{width:`${progress}%`,background:'#c090ff',height:'100%',borderRadius:2}}/></div>}
         <div className="ap-card-badge" style={{background:adult?GENDER_COLOR[apo.gender]+'cc':'#60408088'}}>{adult?`${GENDER_ICON[apo.gender]}${gName}`:`🥚 ${progress}%`}</div>
         {apo.inMining&&<div className="ap-card-mining">⛏️</div>}
@@ -86,26 +102,24 @@ function BreedModal({myApo,onClose,apostles,pc,address,wc,onDone,lang}){
             ?<div style={{padding:'1.5rem',textAlign:'center',color:'#5040a0'}}>{T(`暂无可配对的${pGender}使徒`,`No available ${pGender} apostle`)}<br/><span style={{fontSize:'.72rem'}}>{T('需要已成年（孵化7天后）且无冷却期','Must be adult (7d after hatch) and no cooldown')}</span></div>
             :<div className="ap-modal-grid">{candidates.map(a=>(<div key={a.id} className="ap-modal-item" onClick={()=>setPartner(a)}><ApostleImg apo={a} size={38}/><div style={{fontSize:'.72rem',color:'#c090ff'}}>#{a.id} G{a.gen}</div><div style={{fontSize:'.65rem',color:ELEMS[a.element].color}}><ElemIcon i={a.element} size={11}/>{lang==='zh'?ELEMS[a.element].name:ELEMS[a.element].nameEn} {T('力','STR')}{a.strength}</div></div>))}</div>
           }
-        </>):(
-          <div style={{padding:'1rem'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'1.5rem',justifyContent:'center',marginBottom:'1rem'}}>
-              <div style={{textAlign:'center'}}><ApostleImg apo={myApo} size={56}/><div style={{fontSize:'.75rem',color:'#c090ff'}}>#{myApo.id} {GENDER_ICON[myApo.gender]}</div><div style={{fontSize:'.68rem',color:ELEMS[myApo.element].color}}>{T('力','STR')}{myApo.strength} G{myApo.gen}</div></div>
-              <div style={{fontSize:'1.5rem',color:'#c090ff'}}>💕</div>
-              <div style={{textAlign:'center'}}><ApostleImg apo={partner} size={56}/><div style={{fontSize:'.75rem',color:'#c090ff'}}>#{partner.id} {GENDER_ICON[partner.gender]}</div><div style={{fontSize:'.68rem',color:ELEMS[partner.element].color}}>{T('力','STR')}{partner.strength} G{partner.gen}</div></div>
-            </div>
-            <div style={{background:'#16121e',borderRadius:10,padding:'.7rem',marginBottom:'1rem',fontSize:'.75rem',color:'#9080b0'}}>
-              <div>{T('后代代数：','Offspring Gen:')}<b style={{color:'#c090ff'}}>G{Math.max(myApo.gen,partner.gen)+1}</b></div>
-              <div>{T('预计力量：','Est. STR:')}<b style={{color:'#f0c040'}}>{Math.floor((myApo.strength+partner.strength)/2-15)} ~ {Math.min(Math.floor((myApo.strength+partner.strength)/2+15),100)}</b></div>
-              <div>{T('元素：','Element:')}<b style={{color:ELEMS[myApo.element].color}}>{lang==='zh'?ELEMS[myApo.element].name:ELEMS[myApo.element].nameEn}</b>{T(' 或 ',' or ')}<b style={{color:ELEMS[partner.element].color}}>{lang==='zh'?ELEMS[partner.element].name:ELEMS[partner.element].nameEn}</b></div>
-              <div>{T('繁殖费：','Breed Fee:')}<b style={{color:'#f0c040'}}>{breedFee?formatEther(breedFee):'1'} RING</b></div>
-              <div style={{color:'#6050a0',marginTop:4}}>{T('孵化期：7天后成年','Hatch: adult after 7 days')}</div>
-            </div>
-            <div style={{display:'flex',gap:8}}>
-              <button className="ap-btn-primary" onClick={doBreed}>✅ {T('确认繁殖','Confirm Breed')}</button>
-              <button className="ap-btn-secondary" onClick={()=>setPartner(null)}>← {T('重选','Reselect')}</button>
-            </div>
+        </>):(<div style={{padding:'1rem'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'1.5rem',justifyContent:'center',marginBottom:'1rem'}}>
+            <div style={{textAlign:'center'}}><ApostleImg apo={myApo} size={56}/><div style={{fontSize:'.75rem',color:'#c090ff'}}>#{myApo.id} {GENDER_ICON[myApo.gender]}</div><div style={{fontSize:'.68rem',color:ELEMS[myApo.element].color}}>{T('力','STR')}{myApo.strength} G{myApo.gen}</div></div>
+            <div style={{fontSize:'1.5rem',color:'#c090ff'}}>💕</div>
+            <div style={{textAlign:'center'}}><ApostleImg apo={partner} size={56}/><div style={{fontSize:'.75rem',color:'#c090ff'}}>#{partner.id} {GENDER_ICON[partner.gender]}</div><div style={{fontSize:'.68rem',color:ELEMS[partner.element].color}}>{T('力','STR')}{partner.strength} G{partner.gen}</div></div>
           </div>
-        )}
+          <div style={{background:'#16121e',borderRadius:10,padding:'.7rem',marginBottom:'1rem',fontSize:'.75rem',color:'#9080b0'}}>
+            <div>{T('后代代数：','Offspring Gen:')}<b style={{color:'#c090ff'}}>G{Math.max(myApo.gen,partner.gen)+1}</b></div>
+            <div>{T('预计力量：','Est. STR:')}<b style={{color:'#f0c040'}}>{Math.floor((myApo.strength+partner.strength)/2-15)} ~ {Math.min(Math.floor((myApo.strength+partner.strength)/2+15),100)}</b></div>
+            <div>{T('元素：','Element:')}<b style={{color:ELEMS[myApo.element].color}}>{lang==='zh'?ELEMS[myApo.element].name:ELEMS[myApo.element].nameEn}</b>{T(' 或 ',' or ')}<b style={{color:ELEMS[partner.element].color}}>{lang==='zh'?ELEMS[partner.element].name:ELEMS[partner.element].nameEn}</b></div>
+            <div>{T('繁殖费：','Breed Fee:')}<b style={{color:'#f0c040'}}>{breedFee?formatEther(breedFee):'1'} RING</b></div>
+            <div style={{color:'#6050a0',marginTop:4}}>{T('孵化期：7天后成年','Hatch: adult after 7 days')}</div>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="ap-btn-primary" onClick={doBreed}>✅ {T('确认繁殖','Confirm Breed')}</button>
+            <button className="ap-btn-secondary" onClick={()=>setPartner(null)}>← {T('重选','Reselect')}</button>
+          </div>
+        </div>)}
       </div>
     </div>
   )
@@ -187,7 +201,7 @@ export default function ApostlePage(){
           <div className="ap-modal" onClick={e=>e.stopPropagation()}>
             <div className="ap-modal-head"><span>{T('使徒','Apostle')} #{detailApo.id}</span><button onClick={()=>setDetailApo(null)}>✕</button></div>
             <div style={{padding:'1rem',display:'flex',gap:'1rem'}}>
-              <ApostleImg apo={detailApo} size={90} style={{borderRadius:10}}/>
+              <ApostleImg apo={detailApo} size={90} style={{borderRadius:detailApo.isAdult?'50%':10}}/>
               <div style={{flex:1,display:'flex',flexDirection:'column',gap:6,fontSize:'.78rem',color:'#9080b0'}}>
                 <div><b style={{color:'#c090ff'}}>#{detailApo.id}</b> — G{detailApo.gen}</div>
                 <div>{GENDER_ICON[detailApo.gender]}{T(GENDER_NAME.zh[detailApo.gender],GENDER_NAME.en[detailApo.gender])} · <ElemIcon i={detailApo.element} size={12}/>{lang==='zh'?ELEMS[detailApo.element].name:ELEMS[detailApo.element].nameEn}{T('系 · 力量','· STR')}{detailApo.strength}</div>
