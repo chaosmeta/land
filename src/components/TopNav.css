@@ -19,25 +19,33 @@
   padding-right: 24px;
   border-right: 1px solid rgba(255,255,255,0.06);
   margin-right: 8px;
+  cursor: default;
 }
-.nav-logo-icon {
-  font-size: 24px;
-  color: #4ade80;
-  line-height: 1;
-  filter: drop-shadow(0 0 6px rgba(74,222,128,0.5));
+
+/* Logo 图片 */
+.nav-logo-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(74,222,128,0.35);
+  border: 1px solid rgba(74,222,128,0.25);
 }
+
 .nav-logo-text { display: flex; flex-direction: column; }
 .nav-logo-main {
   font-size: 13px; font-weight: 800;
   color: #f1f5f9;
   letter-spacing: 0.06em;
   font-family: 'Rajdhani', sans-serif;
-  line-height: 1.1;
+  line-height: 1.2;
 }
 .nav-logo-sub {
-  font-size: 9px; color: #334155;
-  letter-spacing: 0.1em;
+  font-size: 9px; color: #4a6a8a;
+  letter-spacing: 0.12em;
   font-family: 'Rajdhani', sans-serif;
+  line-height: 1.1;
 }
 
 .nav-links {
@@ -91,9 +99,9 @@
     margin-right: 0;
     border-right: none;
   }
-  .nav-logo-icon { font-size: 22px; }
-  .nav-logo-main { font-size: 14px; }
-  .nav-logo-sub { font-size: 9px; }
+  .nav-logo-img { width: 30px; height: 30px; border-radius: 6px; }
+  .nav-logo-main { font-size: 13px; }
+  .nav-logo-sub { font-size: 8.5px; }
   .nav-links {
     display: none;
   }
@@ -104,6 +112,7 @@
 @media (max-width: 480px) {
   .top-nav { padding: 0 10px; }
   .nav-logo-sub { display: none; }
+  .nav-logo-img { width: 28px; height: 28px; }
 }
 
 /* 钱包连接按钮 */
