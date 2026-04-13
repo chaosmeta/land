@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
+import { useLang } from '../contexts/LangContext.jsx'
 import { formatEther, encodeFunctionData, parseEther, isAddress } from 'viem'
 import { CONTRACTS, NFT_AUCTION_ADDR } from '../constants/contracts'
 import { APO_EGG_GIF, drillImgUrl, landImgUrl, ELEM_SVGS, ELEMS, RING_SVG } from '../constants/images'
@@ -51,19 +52,13 @@ function fmtR(w,dp=3){return w?Number(formatEther(w)).toFixed(dp):'0'}
 function decodeAttr(a){if(!a)return[0,0,0,0,0];const b=BigInt(a);return[Number(b&0xffffn),Number((b>>16n)&0xffffn),Number((b>>32n)&0xffffn),Number((b>>48n)&0xffffn),Number((b>>64n)&0xffffn)]}
 function ElemIcon({i,size=15}){return <img src={ELEM_SVGS[i]} alt={ELEMS[i].name} style={{width:size,height:size,verticalAlign:'middle'}}/>}
 
-const TABS=[
-  {k:'token',   label:'💰 代币'},
-  {k:'blindbox',label:'🎁 盲盒'},
-  {k:'land',    label:'🏡 地块'},
-  {k:'apostle', label:'🧙 使徒'},
-  {k:'drill',   label:'⛏️ 钻头'},
-  {k:'mining',  label:'⚒️ 挖矿'},
-]
+// TABS built dynamically in AssetsPage with t()
 
 // ── 通用转移弹窗（ERC20 / NFT 共用）─────────────────────────────────────
 // type: 'erc20' | 'nft'
 // 调用方提供: tokenContract, tokenId(nft), symbol(erc20), decimals(erc20), balance(erc20)
 function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, address, wc, pc, onClose, onDone }) {
+  const {t}=useLang()
   const [toAddr, setToAddr] = useState('')
   const [amount, setAmount] = useState('')
   const [msg, setMsg] = useState('')
@@ -72,23 +67,23 @@ function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, a
   const addrOk = isAddress(toAddr) && toAddr.toLowerCase() !== address?.toLowerCase()
 
   async function doTransfer() {
-    if (!addrOk) { setMsg('❌ 地址无效'); return }
-    if (!wc) { setMsg('❌ 请先连接钱包'); return }
+    if (!addrOk) { setMsg(t('❌ 地址无效','❌ Invalid address')); return }
+    if (!wc) { setMsg(t('❌ 请先连接钱包','❌ Connect wallet')); return }
     setBusy(true)
     try {
       let h
       if (type === 'erc20') {
-        if (!amount || isNaN(amount) || Number(amount) <= 0) { setMsg('❌ 请输入有效金额'); setBusy(false); return }
+        if (!amount || isNaN(amount) || Number(amount) <= 0) { setMsg(t('❌ 请输入有效金额','❌ Enter valid amount')); setBusy(false); return }
         const amt = parseEther(amount)
-        if (amt > balance) { setMsg('❌ 余额不足'); setBusy(false); return }
-        setMsg('转账中...')
+        if (amt > balance) { setMsg(t('❌ 余额不足','❌ Insufficient balance')); setBusy(false); return }
+        setMsg(t('转账中...','Transferring...'))
         h = await wc.sendTransaction({ to: tokenContract, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [toAddr, amt] }) })
       } else {
-        setMsg('转移 NFT...')
+        setMsg(t('转移 NFT...','Transferring NFT...'))
         h = await wc.sendTransaction({ to: tokenContract, data: encodeFunctionData({ abi: NFT_ABI, functionName: 'safeTransferFrom', args: [address, toAddr, BigInt(tokenId)] }) })
       }
       await pc.waitForTransactionReceipt({ hash: h })
-      setMsg('✅ 转移成功！')
+      setMsg(t('✅ 转移成功！','✅ Transfer success!'))
       setTimeout(() => { onClose(); onDone?.() }, 1500)
     } catch (e) {
       setMsg('❌ ' + (e.shortMessage || e.message))
@@ -98,8 +93,8 @@ function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, a
   return (
     <div className="as-sell-overlay" onClick={onClose}>
       <div className="as-sell-modal" onClick={e => e.stopPropagation()} style={{ minWidth: 300 }}>
-        <div style={{ fontWeight: 700, marginBottom: 10, color: '#c090ff' }}>📤 转移 {title}</div>
-        <div style={{ fontSize: '.75rem', color: '#7060a0', marginBottom: 6 }}>接收地址</div>
+        <div style={{ fontWeight: 700, marginBottom: 10, color: '#c090ff' }}>{t('转移','Transfer')} {title}</div>
+        <div style={{ fontSize: '.75rem', color: '#7060a0', marginBottom: 6 }}>{t('接收地址','Recipient Address')}</div>
         <input
           className="as-sell-input"
           placeholder="0x..."
@@ -110,12 +105,12 @@ function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, a
         {type === 'erc20' && (
           <>
             <div style={{ fontSize: '.75rem', color: '#7060a0', marginBottom: 4 }}>
-              金额 <span style={{ color: '#5040a0' }}>（余额 {fmtR(balance)} {symbol}）</span>
+              金额 <span style={{ color: '#5040a0' }}>({t('余额','Balance')} {fmtR(balance)} {symbol})</span>
             </div>
             <input
               className="as-sell-input"
               type="number"
-              placeholder={`最大 ${fmtR(balance)}`}
+              placeholder={`max ${fmtR(balance)}`}
               value={amount}
               onChange={e => setAmount(e.target.value)}
               min="0"
@@ -125,19 +120,19 @@ function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, a
             <button
               style={{ fontSize: '.7rem', color: '#5040a0', background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 8px', textDecoration: 'underline' }}
               onClick={() => setAmount(fmtR(balance, 6))}
-            >全部转出</button>
+            >{t('全部转出','Transfer All')}</button>
           </>
         )}
         {msg && <div style={{ fontSize: '.78rem', color: msg.startsWith('✅') ? '#52c462' : '#f06070', margin: '4px 0 8px' }}>{msg}</div>}
         {!addrOk && toAddr.length > 5 && (
-          <div style={{ fontSize: '.72rem', color: '#f06070', marginBottom: 6 }}>地址格式不正确</div>
+          <div style={{ fontSize: '.72rem', color: '#f06070', marginBottom: 6 }}>{t('地址格式不正确','Invalid address format')}</div>
         )}
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <button className="as-btn-primary" style={{ padding: '.4rem .8rem', borderRadius: 8 }}
             onClick={doTransfer} disabled={busy || !addrOk}>
-            {busy ? '处理中...' : '确认转移'}
+            {busy ? t('处理中...','Processing...') : '确认转移'}
           </button>
-          <button className="as-btn-secondary" onClick={onClose}>取消</button>
+          <button className="as-btn-secondary" onClick={onClose}>{t('取消','Cancel')}</button>
         </div>
       </div>
     </div>
@@ -146,6 +141,7 @@ function TransferModal({ type, title, tokenContract, tokenId, symbol, balance, a
 
 // ── BlindBox Tab ──────────────────────────────────────────────────────────
 function BlindBoxTab({pc, address, wc}){
+  const {t,lang}=useLang()
   const [apoPx,setApoPx]=useState(null)
   const [drlPx,setDrlPx]=useState(null)
   const [buying,setBuying]=useState(null)
@@ -160,10 +156,10 @@ function BlindBoxTab({pc, address, wc}){
     ]).then(([a,d])=>{ setApoPx(a); setDrlPx(d) })
   },[pc])
   async function buy(type){
-    if(!wc||!address){ setMsg('请先连接钱包'); return }
+    if(!wc||!address){ setMsg(t('请先连接钱包','Please connect wallet')); return }
     const price=type==='apostle'?apoPx:drlPx; if(!price) return
     const total=price*BigInt(count)
-    setBuying(type); setMsg(`授权 ${fmtR(total)} RING...`)
+    setBuying(type); setMsg(t(`授权 ${fmtR(total)} RING...`,`Approving ${fmtR(total)} RING...`))
     try{
       // approve 一次性授权足够的额度
       const h1=await wc.sendTransaction({to:CONTRACTS.ring,data:encodeFunctionData({abi:ERC20_ABI,functionName:'approve',args:[CONTRACTS.blindbox,total]})})
@@ -172,7 +168,7 @@ function BlindBoxTab({pc, address, wc}){
       const allNewIds=[]
       const buyFn=type==='apostle'?'buyApostleBox':'buyDrillBox'
       for(let i=0;i<count;i++){
-        setMsg(`开启第 ${i+1}/${count} 个${type==='apostle'?'使徒':'钻头'}盲盒...`)
+        setMsg(t(`开启第 ${i+1}/${count} 个${type==='apostle'?'使徒':'钻头'}盲盒...`,`Opening ${i+1}/${count} ${type} box...`))
         const h=await wc.sendTransaction({to:CONTRACTS.blindbox,data:encodeFunctionData({abi:BB_ABI,functionName:buyFn,args:[]})})
         const receipt=await pc.waitForTransactionReceipt({hash:h})
         const nftAddr=(type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill).toLowerCase()
@@ -182,8 +178,8 @@ function BlindBoxTab({pc, address, wc}){
       if(allNewIds.length>0){
         const attrRes=await pc.multicall({contracts:allNewIds.map(id=>({address:type==='apostle'?CONTRACTS.apostle:CONTRACTS.drill,abi:type==='apostle'?APO_ABI:DRL_ABI,functionName:'attrs',args:[BigInt(id)]})),allowFailure:true})
         setResults(r=>[...allNewIds.map((id,i)=>{const at=attrRes[i]?.result;return type==='apostle'?{type,id,strength:at?Number(at[0]):30,elem:at?Number(at[1]):0}:{type,id,tier:at?Number(at[0]):1,elem:at?Number(at[1]):0}}),...r].slice(0,20))
-        setMsg(`🎉 获得 ${allNewIds.length} 个${type==='apostle'?'使徒':'钻头'}！`)
-      } else { setMsg('✅ 购买成功！去使徒/钻头 Tab 查看') }
+        setMsg(t(`🎉 获得 ${allNewIds.length} 个${type==='apostle'?'使徒':'钻头'}！`,`🎉 Got ${allNewIds.length} ${type}(s)!`))
+      } else { setMsg(t('✅ 购买成功！去使徒/钻头 Tab 查看','✅ Success! Check Apostle/Drill tab')) }
     }catch(e){ setMsg('❌ '+(e.shortMessage||e.message)) }
     finally{ setBuying(null) }
   }
@@ -191,21 +187,21 @@ function BlindBoxTab({pc, address, wc}){
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
-      {!address&&<div className="as-empty">请先连接钱包</div>}
+      {!address&&<div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>}
       <div className="bb-asset-cards">
         <div className="bb-count-row">
-          <span style={{color:'#9080b0',fontSize:'.8rem'}}>购买数量：</span>
-          {[1,5,10].map(n=><button key={n} className={`bb-count-btn${count===n?' on':''}`} onClick={()=>setCount(n)}>{n}个</button>)}
+          <span style={{color:'#9080b0',fontSize:'.8rem'}}>{t('购买数量：','Qty:')}</span>
+          {[1,5,10].map(n=><button key={n} className={`bb-count-btn${count===n?' on':''}`} onClick={()=>setCount(n)}>{n}{t('个','')}</button>)}
         </div>
-        {[['apostle','🧙 使徒盲盒','新手30% · 普通55% · 精英13% · 传奇2%',apoPx,`${GH}/apostle/egg.gif`],['drill','⛏️ 钻头盲盒','1星35% · 2星30% · 3星20% · 4星10% · 5星5%',drlPx,drillImgUrl(2,3)]].map(([type,name,desc,px,img])=>(
+        {[['apostle',t('🧙 使徒盲盒','🧙 Apostle Box'),t('新手30% · 普通55% · 精英13% · 传奇2%','Common30%·Rare55%·Epic13%·Legend2%'),apoPx,`${GH}/apostle/egg.gif`],['drill',t('⛏️ 钻头盲盒','⛏️ Drill Box'),t('1星35% · 2星30% · 3星20% · 4星10% · 5星5%','1★35%·2★30%·3★20%·4★10%·5★5%'),drlPx,drillImgUrl(2,3)]].map(([type,name,desc,px,img])=>(
           <div key={type} className={`bb-asset-card ${type}`}>
             <div className="bb-asset-img-wrap"><img src={img} alt={type} className="bb-asset-img"/></div>
             <div className="bb-asset-info">
               <div className="bb-asset-name">{name}</div>
               <div className="bb-asset-desc">{desc}</div>
-              <div className="bb-asset-price">{px?<><span style={{color:'#f0c040',fontWeight:800,fontSize:'1.1rem'}}>{fmtR(px*BigInt(count))}</span> RING × {count}</>:'加载中...'}</div>
+              <div className="bb-asset-price">{px?<><span style={{color:'#f0c040',fontWeight:800,fontSize:'1.1rem'}}>{fmtR(px*BigInt(count))}</span> RING × {count}</>:t('加载中...','Loading...')}</div>
             </div>
-            <button className="as-btn-primary" style={{padding:'.45rem 1rem',borderRadius:10,fontSize:'.85rem'}} onClick={()=>buy(type)} disabled={!address||buying===type||!px}>{buying===type?'开启中...':'🎁 开盲盒'}</button>
+            <button className="as-btn-primary" style={{padding:'.45rem 1rem',borderRadius:10,fontSize:'.85rem'}} onClick={()=>buy(type)} disabled={!address||buying===type||!px}>{buying===type?'开启中...':t('🎁 开盲盒','🎁 Open Box')}</button>
           </div>
         ))}
       </div>
@@ -219,7 +215,7 @@ function BlindBoxTab({pc, address, wc}){
                   <img src={r.type==='apostle'?`${GH}/apostle/egg.gif`:drillImgUrl(r.elem,r.tier)} alt={r.type} className="as-nft-img" style={{objectFit:'contain'}}/>
                 </div>
                 <div className="as-nft-body">
-                  <div className="as-nft-title">{r.type==='apostle'?'使徒':'钻头'} #{r.id}</div>
+                  <div className="as-nft-title">{r.type==='apostle'?t('使徒','Apostle'):t('钻头','Drill')} #{r.id}</div>
                   <div style={{fontSize:'.7rem',color:ELEMS[r.elem].color}}><ElemIcon i={r.elem} size={11}/>{ELEMS[r.elem].name}系{r.type==='apostle'?` · 力量${r.strength}`:` · ${'★'.repeat(r.tier)}`}</div>
                 </div>
               </div>
@@ -234,6 +230,7 @@ function BlindBoxTab({pc, address, wc}){
 
 // ── Token Tab（含转账功能）────────────────────────────────────────────────
 function TokenTab({pc, address, wc}){
+  const {t}=useLang()
   const [bals,setBals]=useState({})
   const [loading,setLoading]=useState(true)
   const [transferModal,setTransferModal]=useState(null) // {sym,addr,color}
@@ -251,8 +248,8 @@ function TokenTab({pc, address, wc}){
       .then(res=>{const b={};tokens.forEach((t,i)=>{b[t.sym]=res[i]?.result??0n});setBals(b)}).finally(()=>setLoading(false))
   },[address,pc])
   useEffect(()=>{loadBals()},[loadBals])
-  if(!address)return <div className="as-empty">请先连接钱包</div>
-  if(loading)return <div className="as-loading"><span className="as-spin"/>加载中...</div>
+  if(!address)return <div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>
+  if(loading)return <div className="as-loading"><span className="as-spin"/>{t('加载中...','Loading...')}</div>
   const cur=transferModal?tokens.find(t=>t.sym===transferModal):null
   return(
     <div>
@@ -267,7 +264,7 @@ function TokenTab({pc, address, wc}){
               style={{marginTop:6,fontSize:'.7rem',padding:'3px 10px'}}
               onClick={()=>setTransferModal(t.sym)}
               disabled={!wc||(bals[t.sym]||0n)===0n}
-            >📤 转账</button>
+            >📤 {t('转账','Transfer')}</button>
           </div>
         ))}
       </div>
@@ -311,6 +308,7 @@ const MINING_FULL_ABI=[
 ]
 
 function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
+  const {t}=useLang()
   const [step, setStep] = useState('loading') // loading | slots | pickApo | pickDrill
   const [slots, setSlots] = useState([])
   const [myApos, setMyApos] = useState([])
@@ -403,7 +401,7 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
 
   async function handleStop(apostleId) {
     if(!wc) return
-    setBusy(true); setMsg('停止挖矿...')
+    setBusy(true); setMsg(t('停止挖矿...','Stopping...'))
     try {
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_FULL_ABI,functionName:'stopMining',args:[BigInt(landId),apostleId]})})
       await pc.waitForTransactionReceipt({hash:h})
@@ -417,18 +415,18 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
     <div className="as-sell-overlay" onClick={onClose}>
       <div className="as-sell-modal cfg-modal" onClick={e=>e.stopPropagation()}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-          <div style={{fontWeight:700,color:'#c090ff',fontSize:'.95rem'}}>⚙️ 配置土地 #{landId}</div>
+          <div style={{fontWeight:700,color:'#c090ff',fontSize:'.95rem'}}>⚙️ {t('配置土地','Config Land')} #{landId}</div>
           <button onClick={onClose} style={{background:'none',border:'none',color:'#7060a0',fontSize:'1.1rem',cursor:'pointer'}}>✕</button>
         </div>
 
-        {step==='loading' && <div className="as-loading"><span className="as-spin"/>加载中...</div>}
+        {step==='loading' && <div className="as-loading"><span className="as-spin"/>{t('加载中...','Loading...')}</div>}
 
         {step!=='loading' && (
           <>
             {/* 当前槽位 */}
-            <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>当前工作区 ({slots.length} 个使徒)</div>
+            <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>{t('当前工作区','Workspace')} ({slots.length} {t('个使徒','apostles')})</div>
             {slots.length===0
-              ? <div style={{fontSize:'.78rem',color:'#3a2a6a',padding:'8px 0',marginBottom:8}}>暂无使徒在挖矿</div>
+              ? <div style={{fontSize:'.78rem',color:'#3a2a6a',padding:'8px 0',marginBottom:8}}>{t('暂无使徒在挖矿','No apostles mining')}</div>
               : <div className="cfg-slots">
                 {slots.map((s,i)=>(
                   <div key={i} className="cfg-slot-row">
@@ -438,7 +436,7 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
                       {s.drillId>0n && <div style={{fontSize:'.68rem',color:ELEMS[s.drlElem].color}}>⛏️ 钻头#{s.drillId.toString()} {'★'.repeat(s.drlTier)}</div>}
                       {s.isOwnerSlot && <div style={{fontSize:'.62rem',color:'#f0c040'}}>⭐ 地主槽</div>}
                     </div>
-                    <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(s.apostleId)} disabled={busy}>停止</button>
+                    <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(s.apostleId)} disabled={busy}>{t('停止','Stop')}</button>
                   </div>
                 ))}
               </div>
@@ -449,9 +447,9 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
             {/* 选择使徒放置 */}
             {step==='slots' && (
               <>
-                <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>放置新使徒（{myApos.length} 个可用）</div>
+                <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>{t('放置新使徒','Place New Apostle')} ({myApos.length} {t('个可用','available')})</div>
                 {myApos.length===0
-                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>钱包中无使徒，去市场或盲盒购买</div>
+                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>{t('钱包中无使徒，去市场或盲盒购买','No apostles in wallet. Buy from market')}</div>
                   : <div className="cfg-pick-grid">
                     {myApos.slice(0,20).map(a=>(
                       <div key={a.id} className="cfg-pick-item" onClick={()=>{setSelApo(a);setStep('pickDrill')}}
@@ -470,14 +468,14 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
             {step==='pickDrill' && selApo && (
               <>
                 <div style={{fontSize:'.75rem',color:'#5040a0',marginBottom:6,fontWeight:600}}>
-                  已选使徒 #{selApo.id}，选配钻头（可跳过）
+                  {t('已选使徒','Selected apostle')} #{selApo.id}，{t('选配钻头（可跳过）','pick drill (optional)')}
                 </div>
                 <button style={{width:'100%',padding:'.4rem',background:'#1a2a1a',border:'1px solid #2a5a2a',borderRadius:7,color:'#52c462',fontSize:'.8rem',cursor:'pointer',marginBottom:8}}
                   onClick={()=>handlePlace(selApo,null)} disabled={busy}>
                   ⚡ 不带钻头，直接放置
                 </button>
                 {myDrills.length===0
-                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>钱包中无钻头</div>
+                  ? <div style={{fontSize:'.78rem',color:'#3a2a6a'}}>{t('钱包中无钻头','No drills in wallet')}</div>
                   : <div className="cfg-pick-grid">
                     {myDrills.slice(0,20).map(d=>(
                       <div key={d.id} className="cfg-pick-item" onClick={()=>handlePlace(selApo,d)} style={{borderColor:ELEMS[d.elem].color+'44'}}>
@@ -489,7 +487,7 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
                   </div>
                 }
                 <button style={{marginTop:8,background:'none',border:'none',color:'#5040a0',fontSize:'.75rem',cursor:'pointer',textDecoration:'underline'}}
-                  onClick={()=>setStep('slots')}>← 重新选使徒</button>
+                  onClick={()=>setStep('slots')}>{t('← 重新选使徒','← Reselect apostle')}</button>
               </>
             )}
 
@@ -503,6 +501,7 @@ function ConfigModal({landId, pc, address, wc, onClose, onDone}) {
 
 // ── Land Tab（含转移 + 配置）─────────────────────────────────────────────
 function LandTab({pc,address,wc}){
+  const {t,lang}=useLang()
   const [lands,setLands]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
@@ -542,40 +541,40 @@ function LandTab({pc,address,wc}){
   useEffect(()=>{load()},[load])
 
   async function handleSell(landId){
-    if(!wc){alert('请先连接钱包');return}; setMsg('授权中...')
+    if(!wc){alert(t('请先连接钱包','Please connect wallet'));return}; setMsg(t('授权中...','Approving...'))
     try{
       const isAppr=await pc.readContract({address:CONTRACTS.land,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
       if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.land,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
-      setMsg('挂单中...')
+      setMsg(t('挂单中...','Listing...'))
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:[{type:'function',name:'createAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'},{name:'sp',type:'uint128'},{name:'ep',type:'uint128'},{name:'dur',type:'uint64'}],outputs:[],stateMutability:'nonpayable'}],functionName:'createAuction',args:[CONTRACTS.land,BigInt(landId),parseEther(sellPrice),parseEther('1'),BigInt(3*24*3600)]})})
       await pc.waitForTransactionReceipt({hash:h})
       setMsg('✅ 挂单成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},3000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleCancel(landId,auctionType){
-    if(!wc)return; setMsg('撤销中...')
+    if(!wc)return; setMsg(t('撤销中...','Cancelling...'))
     try{
       const h=auctionType==='old'
         ?await wc.sendTransaction({to:CONTRACTS.auction,data:encodeFunctionData({abi:AUC_ABI,functionName:'cancelAuction',args:[BigInt(landId)]})})
         :await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:[{type:'function',name:'cancelAuction',inputs:[{name:'nft',type:'address'},{name:'id',type:'uint256'}],outputs:[],stateMutability:'nonpayable'}],functionName:'cancelAuction',args:[CONTRACTS.land,BigInt(landId)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 已撤销','✅ Cancelled'));setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
 
-  if(!address)return <div className="as-empty">请先连接钱包</div>
-  if(loading)return <div className="as-loading"><span className="as-spin"/>加载中...</div>
+  if(!address)return <div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>
+  if(loading)return <div className="as-loading"><span className="as-spin"/>{t('加载中...','Loading...')}</div>
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
       {sellModal&&(
         <div className="as-sell-overlay" onClick={()=>setSellModal(null)}>
           <div className="as-sell-modal" onClick={e=>e.stopPropagation()}>
-            <div style={{fontWeight:700,marginBottom:8}}>挂卖土地 #{sellModal}</div>
+            <div style={{fontWeight:700,marginBottom:8}}>{t('挂卖土地','List Land')} #{sellModal}</div>
             <div style={{fontSize:'.78rem',color:'#9080b0',marginBottom:10}}>起拍价 (RING)，3天荷兰拍，底价1 RING</div>
             <input className="as-sell-input" type="number" value={sellPrice} onChange={e=>setSellPrice(e.target.value)} min="1" step="0.5"/>
             <div style={{display:'flex',gap:8,marginTop:12}}>
-              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={()=>handleSell(sellModal)}>确认挂单</button>
-              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>取消</button>
+              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={()=>handleSell(sellModal)}>t('确认挂单','Confirm List')</button>
+              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>{t('取消','Cancel')}</button>
             </div>
           </div>
         </div>
@@ -595,23 +594,23 @@ function LandTab({pc,address,wc}){
             <div key={l.id} className="as-nft-card">
               <div className="as-nft-img-wrap"><img src={landImgUrl(l.id)} alt="land" className="as-nft-img"/></div>
               <div className="as-nft-body">
-                <div className="as-nft-title">土地 #{l.id} <span style={{fontSize:'.6rem',color:'#4030a0'}}>({(l.id-1)%100},{Math.floor((l.id-1)/100)})</span></div>
+                <div className="as-nft-title">{t('土地','Land')} #{l.id} <span style={{fontSize:'.6rem',color:'#4030a0'}}>({(l.id-1)%100},{Math.floor((l.id-1)/100)})</span></div>
                 {l.slots>0&&<div style={{fontSize:'.68rem',color:'#f0c040'}}>⛏️ {l.slots}槽挖矿中</div>}
-                {l.inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
+                {l.inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>{t('🔖 拍卖中','🔖 In Auction')}</div>}
                 <div className="as-res-bars">{vals.map((v,i)=><div key={i} className="as-res-bar-row"><ElemIcon i={i} size={11}/><div className="as-res-bar-bg"><div style={{width:`${(v/maxV*100).toFixed(0)}%`,height:'100%',background:ELEMS[i].color,borderRadius:2}}/></div><span style={{color:ELEMS[i].color,fontSize:'.62rem',minWidth:22}}>{v}</span></div>)}</div>
                 <div className="as-nft-actions">
                   {l.inAuction
-                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(l.id,l.auctionType)}>撤销挂单</button>
-                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>挂卖</button>
+                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(l.id,l.auctionType)}>{t('撤销挂单','Cancel Listing')}</button>
+                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(l.id)}>{t('挂卖','List')}</button>
                   }
-                  {!l.inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(l.id)}>📤 转移</button>}
-                  <button className="as-btn-sm" style={{background:'#1a1a40',border:'1px solid #3a2a6a',color:'#a080d0',borderRadius:6,padding:'4px 8px',fontSize:'.72rem',cursor:'pointer'}} onClick={()=>setConfigId(l.id)}>⚙️ 配置</button>
+                  {!l.inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(l.id)}>{t('📤 转移','📤 Transfer')}</button>}
+                  <button className="as-btn-sm" style={{background:'#1a1a40',border:'1px solid #3a2a6a',color:'#a080d0',borderRadius:6,padding:'4px 8px',fontSize:'.72rem',cursor:'pointer'}} onClick={()=>setConfigId(l.id)}>{t('⚙️ 配置','⚙️ Config')}</button>
                 </div>
               </div>
             </div>
           )
         })}
-        {lands.length===0&&<div className="as-empty">暂无地块</div>}
+        {lands.length===0&&<div className="as-empty">{t('暂无地块','No lands')}</div>}
       </div>
     </div>
   )
@@ -619,6 +618,7 @@ function LandTab({pc,address,wc}){
 
 // ── Apostle Tab（含转移+批量挂单）──────────────────────────────────────────
 function ApostleTab({pc,address,wc}){
+  const {t,lang}=useLang()
   const [apos,setApos]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
@@ -654,30 +654,30 @@ function ApostleTab({pc,address,wc}){
   useEffect(()=>{load()},[load])
 
   async function handleSell(apoId){
-    if(!wc)return; setMsg('授权中...')
+    if(!wc)return; setMsg(t('授权中...','Approving...'))
     try{
       const isAppr=await pc.readContract({address:CONTRACTS.apostle,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
       if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
-      setMsg('挂单中...')
+      setMsg(t('挂单中...','Listing...'))
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'createAuction',args:[CONTRACTS.apostle,BigInt(apoId),parseEther(sellPrice),parseEther('0.5'),BigInt(3*24*3600)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 成功！','✅ Success!'));setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleCancel(apoId){
-    if(!wc)return; setMsg('撤销中...')
+    if(!wc)return; setMsg(t('撤销中...','Cancelling...'))
     try{
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'cancelAuction',args:[CONTRACTS.apostle,BigInt(apoId)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 已撤销','✅ Cancelled'));setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   // 批量挂单
   async function handleBatchSell(){
-    if(!wc)return; setBatchBusy(true); setMsg('批量挂单中...')
+    if(!wc)return; setBatchBusy(true); setMsg(t('批量挂单中...','Batch listing...'))
     try{
       const n=Number(batchCount)||5
       const sp=parseEther(batchSP||'3'), ep=parseEther(batchEP||'0.5')
       const isAppr=await pc.readContract({address:CONTRACTS.apostle,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
-      if(!isAppr){ setMsg('授权中...'); const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})}); await pc.waitForTransactionReceipt({hash:h}) }
+      if(!isAppr){ setMsg(t('授权中...','Approving...')); const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})}); await pc.waitForTransactionReceipt({hash:h}) }
       let done=0
       for(const a of apos){
         if(done>=n) break
@@ -692,8 +692,8 @@ function ApostleTab({pc,address,wc}){
     setBatchBusy(false)
   }
 
-  if(!address)return <div className="as-empty">请先连接钱包</div>
-  if(loading)return <div className="as-loading"><span className="as-spin"/>扫描使徒中...</div>
+  if(!address)return <div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>
+  if(loading)return <div className="as-loading"><span className="as-spin"/>{t('扫描使徒中...','Scanning apostles...')}</div>
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
@@ -705,17 +705,17 @@ function ApostleTab({pc,address,wc}){
       {batchModal&&(
         <div className="as-sell-overlay" onClick={()=>setBatchModal(false)}>
           <div className="as-sell-modal" onClick={e=>e.stopPropagation()} style={{minWidth:280}}>
-            <div style={{fontWeight:700,marginBottom:10,color:'#c090ff'}}>📦 批量挂使徒</div>
-            {[['数量上限',batchCount,setBatchCount,'5'],['起拍价(RING)',batchSP,setBatchSP,'3'],['底价(RING)',batchEP,setBatchEP,'0.5']].map(([l,v,s,p])=>(
+            <div style={{fontWeight:700,marginBottom:10,color:'#c090ff'}}>{t('📦 批量挂使徒','📦 Batch List Apostles')}</div>
+            {[[t('数量上限','Count Limit'),batchCount,setBatchCount,'5'],[t('起拍价(RING)','Start Price(RING)'),batchSP,setBatchSP,'3'],[t('底价(RING)','Floor(RING)'),batchEP,setBatchEP,'0.5']].map(([l,v,s,p])=>(
               <div key={l} style={{marginBottom:8}}>
                 <div style={{fontSize:'.72rem',color:'#7060a0',marginBottom:3}}>{l}</div>
                 <input className="as-sell-input" type="number" value={v} onChange={e=>s(e.target.value)} placeholder={p}/>
               </div>
             ))}
-            <div style={{fontSize:'.68rem',color:'#5040a0',marginBottom:10}}>拍卖时长3天 · 跳过已挂单的</div>
+            <div style={{fontSize:'.68rem',color:'#5040a0',marginBottom:10}}>{t('拍卖时长3天 · 跳过已挂单的','3-day auction · Skip listed')}</div>
             <div style={{display:'flex',gap:8}}>
-              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={handleBatchSell} disabled={batchBusy}>{batchBusy?'挂单中...':'确认批量挂单'}</button>
-              <button className="as-btn-secondary" onClick={()=>setBatchModal(false)}>取消</button>
+              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={handleBatchSell} disabled={batchBusy}>{batchBusy?t('挂单中...','Listing...'):t('确认批量挂单','Confirm Batch')}</button>
+              <button className="as-btn-secondary" onClick={()=>setBatchModal(false)}>{t('取消','Cancel')}</button>
             </div>
           </div>
         </div>
@@ -723,11 +723,11 @@ function ApostleTab({pc,address,wc}){
       {sellModal&&(
         <div className="as-sell-overlay" onClick={()=>setSellModal(null)}>
           <div className="as-sell-modal" onClick={e=>e.stopPropagation()}>
-            <div style={{fontWeight:700,marginBottom:8}}>挂卖使徒 #{sellModal}</div>
+            <div style={{fontWeight:700,marginBottom:8}}>{t('挂卖使徒','List Apostle')} #{sellModal}</div>
             <input className="as-sell-input" type="number" value={sellPrice} onChange={e=>setSellPrice(e.target.value)} min="1"/>
             <div style={{display:'flex',gap:8,marginTop:12}}>
               <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={()=>handleSell(sellModal)}>确认</button>
-              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>取消</button>
+              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>{t('取消','Cancel')}</button>
             </div>
           </div>
         </div>
@@ -745,21 +745,21 @@ function ApostleTab({pc,address,wc}){
                 <img src={APO_EGG_GIF} alt="apostle" className="as-nft-img" style={{objectFit:'contain'}}/>
               </div>
               <div className="as-nft-body">
-                <div className="as-nft-title">使徒 #{a.id}</div>
-                <div style={{fontSize:'.7rem',color:ELEMS[a.elem].color}}><ElemIcon i={a.elem} size={11}/>{ELEMS[a.elem].name}系 · 力量{a.strength}</div>
-                {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
+                <div className="as-nft-title">{t('使徒','Apostle')} #{a.id}</div>
+                <div style={{fontSize:'.7rem',color:ELEMS[a.elem].color}}><ElemIcon i={a.elem} size={11}/>{lang==='zh'?ELEMS[a.elem].name:ELEMS[a.elem].nameEn} · {t('力量','STR')}{a.strength}</div>
+                {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>{t('🔖 拍卖中','🔖 In Auction')}</div>}
                 <div className="as-nft-actions">
                   {inAuction
-                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(a.id)}>撤销</button>
-                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(a.id)}>挂卖</button>
+                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(a.id)}>{t('撤销','Cancel')}</button>
+                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(a.id)}>{t('挂卖','List')}</button>
                   }
-                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(a.id)}>📤 转移</button>}
+                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(a.id)}>{t('📤 转移','📤 Transfer')}</button>}
                 </div>
               </div>
             </div>
           )
         })}
-        {apos.length===0&&<div className="as-empty">暂无使徒<br/><span style={{fontSize:'.75rem',color:'#4030a0'}}>去盲盒 Tab 购买</span></div>}
+        {apos.length===0&&<div className="as-empty">{t('暂无使徒','No apostles')}<br/><span style={{fontSize:'.75rem',color:'#4030a0'}}>{t('去盲盒 Tab 购买','Buy from BlindBox tab')}</span></div>}
       </div>
     </div>
   )
@@ -767,6 +767,7 @@ function ApostleTab({pc,address,wc}){
 
 // ── Drill Tab（含转移+批量挂单）─────────────────────────────────────────────
 function DrillTab({pc,address,wc}){
+  const {t,lang}=useLang()
   const [drills,setDrills]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
@@ -801,24 +802,24 @@ function DrillTab({pc,address,wc}){
   useEffect(()=>{load()},[load])
 
   async function handleSell(drlId){
-    if(!wc)return; setMsg('授权中...')
+    if(!wc)return; setMsg(t('授权中...','Approving...'))
     try{
       const isAppr=await pc.readContract({address:CONTRACTS.drill,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
       if(!isAppr){const h=await wc.sendTransaction({to:CONTRACTS.drill,data:encodeFunctionData({abi:NFT_ABI,functionName:'setApprovalForAll',args:[NFT_AUCTION_ADDR,true]})});await pc.waitForTransactionReceipt({hash:h})}
-      setMsg('挂单中...')
+      setMsg(t('挂单中...','Listing...'))
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'createAuction',args:[CONTRACTS.drill,BigInt(drlId),parseEther(sellPrice),parseEther('0.1'),BigInt(3*24*3600)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 成功！');setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 成功！','✅ Success!'));setSellModal(null);setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleCancel(drlId){
-    if(!wc)return; setMsg('撤销中...')
+    if(!wc)return; setMsg(t('撤销中...','Cancelling...'))
     try{
       const h=await wc.sendTransaction({to:NFT_AUCTION_ADDR,data:encodeFunctionData({abi:NFT_AUC_ABI,functionName:'cancelAuction',args:[CONTRACTS.drill,BigInt(drlId)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已撤销');setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 已撤销','✅ Cancelled'));setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
   async function handleBatchSell(){
-    if(!wc)return; setBatchBusy(true); setMsg('批量挂单中...')
+    if(!wc)return; setBatchBusy(true); setMsg(t('批量挂单中...','Batch listing...'))
     try{
       const n=Number(batchCount)||5
       const isAppr=await pc.readContract({address:CONTRACTS.drill,abi:NFT_ABI,functionName:'isApprovedForAll',args:[address,NFT_AUCTION_ADDR]}).catch(()=>false)
@@ -841,8 +842,8 @@ function DrillTab({pc,address,wc}){
     setBatchBusy(false)
   }
 
-  if(!address)return <div className="as-empty">请先连接钱包</div>
-  if(loading)return <div className="as-loading"><span className="as-spin"/>扫描钻头中...</div>
+  if(!address)return <div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>
+  if(loading)return <div className="as-loading"><span className="as-spin"/>{t('扫描钻头中...','Scanning drills...')}</div>
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
@@ -853,17 +854,17 @@ function DrillTab({pc,address,wc}){
       {batchModal&&(
         <div className="as-sell-overlay" onClick={()=>setBatchModal(false)}>
           <div className="as-sell-modal" onClick={e=>e.stopPropagation()} style={{minWidth:280}}>
-            <div style={{fontWeight:700,marginBottom:10,color:'#c090ff'}}>📦 批量挂钻头</div>
-            {[['数量上限',batchCount,setBatchCount,'5'],['1★起拍(RING)',batchSP,setBatchSP,'1'],['1★底价(RING)',batchEP,setBatchEP,'0.2']].map(([l,v,s,p])=>(
+            <div style={{fontWeight:700,marginBottom:10,color:'#c090ff'}}>{t('📦 批量挂钻头','📦 Batch List Drills')}</div>
+            {[[t('数量上限','Count Limit'),batchCount,setBatchCount,'5'],[t('1★起拍(RING)','1★ Start(RING)'),batchSP,setBatchSP,'1'],[t('1★底价(RING)','1★ Floor(RING)'),batchEP,setBatchEP,'0.2']].map(([l,v,s,p])=>(
               <div key={l} style={{marginBottom:8}}>
                 <div style={{fontSize:'.72rem',color:'#7060a0',marginBottom:3}}>{l}</div>
                 <input className="as-sell-input" type="number" value={v} onChange={e=>s(e.target.value)} placeholder={p}/>
               </div>
             ))}
-            <div style={{fontSize:'.68rem',color:'#5040a0',marginBottom:10}}>1★×1 2★×2 3★×4 4★×8 5★×16 · 3天荷兰拍</div>
+            <div style={{fontSize:'.68rem',color:'#5040a0',marginBottom:10}}>{t('1★×1 2★×2 3★×4 4★×8 5★×16 · 3天荷兰拍','1★×1 2★×2 3★×4 4★×8 5★×16 · 3-day')}</div>
             <div style={{display:'flex',gap:8}}>
-              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={handleBatchSell} disabled={batchBusy}>{batchBusy?'挂单中...':'确认批量挂单'}</button>
-              <button className="as-btn-secondary" onClick={()=>setBatchModal(false)}>取消</button>
+              <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={handleBatchSell} disabled={batchBusy}>{batchBusy?t('挂单中...','Listing...'):t('确认批量挂单','Confirm Batch')}</button>
+              <button className="as-btn-secondary" onClick={()=>setBatchModal(false)}>{t('取消','Cancel')}</button>
             </div>
           </div>
         </div>
@@ -871,11 +872,11 @@ function DrillTab({pc,address,wc}){
       {sellModal&&(
         <div className="as-sell-overlay" onClick={()=>setSellModal(null)}>
           <div className="as-sell-modal" onClick={e=>e.stopPropagation()}>
-            <div style={{fontWeight:700,marginBottom:8}}>挂卖钻头 #{sellModal}</div>
+            <div style={{fontWeight:700,marginBottom:8}}>{t('挂卖钻头','List Drill')} #{sellModal}</div>
             <input className="as-sell-input" type="number" value={sellPrice} onChange={e=>setSellPrice(e.target.value)} min="1"/>
             <div style={{display:'flex',gap:8,marginTop:12}}>
               <button className="as-btn-primary" style={{padding:'.4rem .8rem',borderRadius:8}} onClick={()=>handleSell(sellModal)}>确认</button>
-              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>取消</button>
+              <button className="as-btn-secondary" onClick={()=>setSellModal(null)}>{t('取消','Cancel')}</button>
             </div>
           </div>
         </div>
@@ -893,21 +894,21 @@ function DrillTab({pc,address,wc}){
                 <img src={drillImgUrl(d.elem,d.tier)} alt="drill" className="as-nft-img" style={{objectFit:'contain'}}/>
               </div>
               <div className="as-nft-body">
-                <div className="as-nft-title">钻头 #{d.id}</div>
-                <div style={{fontSize:'.7rem',color:ELEMS[d.elem].color}}><ElemIcon i={d.elem} size={11}/>{ELEMS[d.elem].name}系 · {'★'.repeat(d.tier)}</div>
-                {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>🔖 拍卖中</div>}
+                <div className="as-nft-title">{t('钻头','Drill')} #{d.id}</div>
+                <div style={{fontSize:'.7rem',color:ELEMS[d.elem].color}}><ElemIcon i={d.elem} size={11}/>{lang==='zh'?ELEMS[d.elem].name:ELEMS[d.elem].nameEn} · {'★'.repeat(d.tier)}</div>
+                {inAuction&&<div style={{fontSize:'.68rem',color:'#52c462'}}>{t('🔖 拍卖中','🔖 In Auction')}</div>}
                 <div className="as-nft-actions">
                   {inAuction
-                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(d.id)}>撤销</button>
-                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(d.id)}>挂卖</button>
+                    ?<button className="as-btn-sm as-btn-danger" onClick={()=>handleCancel(d.id)}>{t('撤销','Cancel')}</button>
+                    :<button className="as-btn-sm as-btn-primary" onClick={()=>setSellModal(d.id)}>{t('挂卖','List')}</button>
                   }
-                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(d.id)}>📤 转移</button>}
+                  {!inAuction&&<button className="as-btn-sm as-btn-secondary" onClick={()=>setTransferId(d.id)}>{t('📤 转移','📤 Transfer')}</button>}
                 </div>
               </div>
             </div>
           )
         })}
-        {drills.length===0&&<div className="as-empty">暂无钻头<br/><span style={{fontSize:'.75rem',color:'#4030a0'}}>去盲盒 Tab 购买</span></div>}
+        {drills.length===0&&<div className="as-empty">{t('暂无钻头','No drills')}<br/><span style={{fontSize:'.75rem',color:'#4030a0'}}>{t('去盲盒 Tab 购买','Buy from BlindBox tab')}</span></div>}
       </div>
     </div>
   )
@@ -915,6 +916,7 @@ function DrillTab({pc,address,wc}){
 
 // ── Mining Tab ────────────────────────────────────────────────────────────
 function MiningTab({pc,address,wc}){
+  const {t}=useLang()
   const [lands,setLands]=useState([])
   const [loading,setLoading]=useState(true)
   const [msg,setMsg]=useState('')
@@ -962,31 +964,31 @@ function MiningTab({pc,address,wc}){
   useEffect(()=>{load()},[load])
 
   async function handleClaim(landId, isLandOwner){
-    if(!wc)return; setMsg('领取中...')
+    if(!wc)return; setMsg(t('领取中...','Claiming...'))
     try{
       const fn = isLandOwner ? 'claim' : 'claimMiner'
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:fn,args:[BigInt(landId)]})})
-      await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 领取成功！');setTimeout(()=>{setMsg('');load()},2000)
+      await pc.waitForTransactionReceipt({hash:h}); setMsg(t('✅ 领取成功！','✅ Claimed!'));setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){
       const m=e.shortMessage||e.message||''
       if(m.includes('internal')||m.includes('Internal')){
-        setMsg('❌ 领取失败：奖励池余额不足，请联系管理员充值资源 token')
+        setMsg(t('❌ 领取失败：奖励池余额不足','❌ Claim failed: reward pool empty'))
       } else {
         setMsg('❌ '+ m)
       }
     }
   }
   async function handleStop(landId,apostleId){
-    if(!wc)return; setMsg('停止挖矿...')
+    if(!wc)return; setMsg(t('停止挖矿...','Stopping...'))
     try{
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),BigInt(apostleId)]})})
       await pc.waitForTransactionReceipt({hash:h}); setMsg('✅ 已停止');setTimeout(()=>{setMsg('');load()},2000)
     }catch(e){setMsg('❌ '+(e.shortMessage||e.message))}
   }
 
-  if(!address)return <div className="as-empty">请先连接钱包</div>
-  if(loading)return <div className="as-loading"><span className="as-spin"/>扫描挖矿中...</div>
-  if(!lands.length)return <div className="as-empty">暂无挖矿中的地块</div>
+  if(!address)return <div className="as-empty">{t('请先连接钱包','Please connect wallet')}</div>
+  if(loading)return <div className="as-loading"><span className="as-spin"/>{t('扫描挖矿中...','Scanning mining...')}</div>
+  if(!lands.length)return <div className="as-empty">{t('暂无挖矿中的地块','No lands currently mining')}</div>
   return(
     <div>
       {msg&&<div className="as-msg">{msg}</div>}
@@ -999,22 +1001,22 @@ function MiningTab({pc,address,wc}){
               <div className="as-mining-head">
                 <img src={landImgUrl(l.id)} alt="land" style={{width:52,height:52,borderRadius:8,objectFit:'cover'}}/>
                 <div style={{flex:1}}>
-                  <div style={{fontWeight:700,color:'#c090ff'}}>土地 #{l.id}</div>
-                  <div style={{fontSize:'.72rem',color:'#5040a0'}}>{l.slotCount} 个使徒工作中</div>
-                  {l.isLandOwner&&<div style={{fontSize:'.65rem',color:'#f0c040'}}>⭐ 你是地块持有者</div>}
+                  <div style={{fontWeight:700,color:'#c090ff'}}>{t('土地','Land')} #{l.id}</div>
+                  <div style={{fontSize:'.72rem',color:'#5040a0'}}>{l.slotCount} {t('个使徒工作中','apostles working')}</div>
+                  {l.isLandOwner&&<div style={{fontSize:'.65rem',color:'#f0c040'}}>⭐ {t('你是地块持有者','You own this land')}</div>}
                 </div>
                 <div style={{display:'flex',flexDirection:'column',gap:4}}>
                   {l.isLandOwner&&(
-                    <button className="as-btn-sm as-btn-primary" onClick={()=>handleClaim(l.id,true)} disabled={!hasOwnerReward}>💰 领取(地主)</button>
+                    <button className="as-btn-sm as-btn-primary" onClick={()=>handleClaim(l.id,true)} disabled={!hasOwnerReward}>{t('💰 领取(地主)','💰 Claim(Owner)')}</button>
                   )}
                   {hasMinerReward&&(
-                    <button className="as-btn-sm" style={{background:'#1a3a1a',border:'1px solid #2a6a2a',color:'#52c462',borderRadius:6,padding:'4px 8px',fontSize:'.72rem',cursor:'pointer'}} onClick={()=>handleClaim(l.id,false)}>⛏️ 领取(矿工)</button>
+                    <button className="as-btn-sm" style={{background:'#1a3a1a',border:'1px solid #2a6a2a',color:'#52c462',borderRadius:6,padding:'4px 8px',fontSize:'.72rem',cursor:'pointer'}} onClick={()=>handleClaim(l.id,false)}>{t('⛏️ 领取(矿工)','⛏️ Claim(Miner)')}</button>
                   )}
                 </div>
               </div>
               {l.isLandOwner&&l.ownerRewards&&(
                 <div className="as-rewards-row">
-                  <span style={{fontSize:'.68rem',color:'#f0c040',marginRight:6}}>地主待领（含手续费）：</span>
+                  <span style={{fontSize:'.68rem',color:'#f0c040',marginRight:6}}>{t('地主待领（含手续费）：','Owner pending (incl fee):')}</span>
                   {ELEMS.map((el,i)=>(
                     <span key={i} style={{fontSize:'.72rem',color:el.color,marginRight:8}}><ElemIcon i={i} size={11}/>{fmtR(l.ownerRewards[i]||0n,2)}</span>
                   ))}
@@ -1022,7 +1024,7 @@ function MiningTab({pc,address,wc}){
               )}
               {l.minerRewards&&l.minerRewards.some(v=>v>0n)&&(
                 <div className="as-rewards-row">
-                  <span style={{fontSize:'.68rem',color:'#52c462',marginRight:6}}>矿工待领（扣10%手续费）：</span>
+                  <span style={{fontSize:'.68rem',color:'#52c462',marginRight:6}}>{t('矿工待领（扣10%手续费）：','Miner pending (10% fee):')}</span>
                   {ELEMS.map((el,i)=>(
                     <span key={i} style={{fontSize:'.72rem',color:el.color,marginRight:8}}><ElemIcon i={i} size={11}/>{fmtR(l.minerRewards[i]||0n,2)}</span>
                   ))}
@@ -1035,7 +1037,7 @@ function MiningTab({pc,address,wc}){
                     <span>#{slot.apostleId?.toString()}</span>
                     {slot.isOwnerSlot&&<span style={{fontSize:'.6rem',color:'#f0c040'}}>⭐</span>}
                     {slot.drillId>0n&&<><img src={drillImgUrl(0,1)} style={{width:22,height:22}}/><span>#{slot.drillId?.toString()}</span></>}
-                    <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id,slot.apostleId)}>停</button>
+                    <button className="as-btn-xs as-btn-danger" onClick={()=>handleStop(l.id,slot.apostleId)}>{t('停','Stop')}</button>
                   </div>
                 ))}
               </div>
@@ -1050,13 +1052,22 @@ function MiningTab({pc,address,wc}){
 // ── Main ──────────────────────────────────────────────────────────────────
 export default function AssetsPage({initialTab='token'}){
   const pc=usePublicClient(),{address}=useAccount(),{data:wc}=useWalletClient()
+  const {t}=useLang()
   const [tab,setTab]=useState(initialTab)
   useEffect(()=>{if(initialTab)setTab(initialTab)},[initialTab])
+  const TABS=[
+    {k:'token',   label:`💰 ${t('代币','Tokens')}`},
+    {k:'blindbox',label:`🎁 ${t('盲盒','BlindBox')}`},
+    {k:'land',    label:`🏡 ${t('地块','Lands')}`},
+    {k:'apostle', label:`🧙 ${t('使徒','Apostles')}`},
+    {k:'drill',   label:`⛏️ ${t('钻头','Drills')}`},
+    {k:'mining',  label:`⚒️ ${t('挖矿','Mining')}`},
+  ]
   return(
     <div className="as-root">
-      <div className="as-header"><h1 className="as-title">💎 我的资产</h1></div>
+      <div className="as-header"><h1 className="as-title">💎 {t('我的资产','My Assets')}</h1></div>
       <div className="as-tabs">
-        {TABS.map(t=><button key={t.k} className={`as-tab${tab===t.k?' on':''}`} onClick={()=>setTab(t.k)}>{t.label}</button>)}
+        {TABS.map(tk=><button key={tk.k} className={`as-tab${tab===tk.k?' on':''}`} onClick={()=>setTab(tk.k)}>{tk.label}</button>)}
       </div>
       <div className="as-content">
         {tab==='token'   &&<TokenTab   pc={pc} address={address} wc={wc}/>}

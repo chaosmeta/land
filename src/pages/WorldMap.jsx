@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { usePublicClient, useAccount, useWalletClient } from '../contexts/WalletContext.jsx'
+import { useLang } from '../contexts/LangContext.jsx'
 import { encodeFunctionData, formatEther } from 'viem'
 import { APO_EGG_GIF, drillImgUrl, ELEM_SVGS, ELEMS } from '../constants/images'
 import { CONTRACTS } from '../constants/contracts'
@@ -176,6 +177,7 @@ export default function WorldMap() {
   const pc=usePublicClient()
   const { address }=useAccount()
   const { data:wc }=useWalletClient()
+  const { t, lang }=useLang()
   const [picker,setPicker]=useState(null)
   const [pickerItems,setPickerItems]=useState([])
   const [pickerMsg,setPickerMsg]=useState('')
@@ -417,7 +419,7 @@ export default function WorldMap() {
   // ── 保存元数据上链 ──────────────────────────────────────────────────────────
   async function handleSaveMeta() {
     if(!wc||!address||!sel) return
-    setMetaBusy(true); setMetaMsg('写入链上...')
+    setMetaBusy(true); setMetaMsg(t('写入链上...','Saving on-chain...'))
     try {
       const h = await wc.sendTransaction({
         to: CONTRACTS.landMeta,
@@ -429,7 +431,7 @@ export default function WorldMap() {
       })
       await pc.waitForTransactionReceipt({ hash: h })
       setLandMeta(p=>({...p,[sel]:{avatarUrl:metaForm.avatarUrl.trim(),description:metaForm.description.trim()}}))
-      setMetaMsg('✅ 保存成功！')
+      setMetaMsg(t('✅ 保存成功！','✅ Saved!'))
       setTimeout(()=>{ setEditingMeta(false); setMetaMsg('') }, 1500)
     } catch(e) {
       setMetaMsg('❌ '+(e.shortMessage||e.message))
@@ -676,9 +678,9 @@ export default function WorldMap() {
   const ELEMS=[{k:'GOLD',c:'#f0c040',i:'🪙'},{k:'WOOD',c:'#52c462',i:'🪵'},{k:'WATER',c:'#40a0f0',i:'💧'},{k:'FIRE',c:'#f05030',i:'🔥'},{k:'SOIL',c:'#c08040',i:'🪨'}]
   // 图例
   const LEGEND=[
-    [PAL.MY[0],'我的地块'],[PAL.MY_AUC[0],'我的拍卖'],
-    [PAL.ONSALE[0],'出售中'],[PAL.MINE[0],'挖矿中'],[PAL.OWNED[0],'已有主'],
-    [PAL.GENESIS[0],'首拍'],[PAL.RESERVE[0],'保留'],[PAL.MYSTIC[0],'神秘'],
+    [PAL.MY[0],t('我的地块','My Land')],[PAL.MY_AUC[0],t('我的拍卖','My Auction')],
+    [PAL.ONSALE[0],t('出售中','On Sale')],[PAL.MINE[0],t('挖矿中','Mining')],[PAL.OWNED[0],t('已有主','Owned')],
+    [PAL.GENESIS[0],t('首拍','Genesis')],[PAL.RESERVE[0],t('保留','Reserve')],[PAL.MYSTIC[0],t('神秘','Mystic')],
   ]
 
   // ── NFT扫描工具函数 ───────────────────────────────────────────────────────
@@ -709,33 +711,33 @@ export default function WorldMap() {
   // picker: null | 'apostle' | 'drill-optional'
   // 流程：点＋→扫使徒列表 → 选使徒 → 弹"是否带钻头?" → 选或跳过 → startMining
   async function openPicker(type) {
-    if(!address||!pc){alert('请先连接钱包');return}
+    if(!address||!pc){alert(t('请先连接钱包','Please connect wallet'));return}
     window._selApo=null; window._selDrl=null
-    setPicker(type); setPickerMsg('扫描中...'); setPickerItems([])
+    setPicker(type); setPickerMsg(t('扫描中...','Scanning...')); setPickerItems([])
     try{
       const items=await scanWalletNFTs(type)
       setPickerItems(items)
-      setPickerMsg(items.length>0?`找到 ${items.length} 个，点击选择`:`钱包中无可用${type==='apostle'?'使徒':'钻头'}`)
-    }catch(e){setPickerMsg('加载失败: '+e.message)}
+      setPickerMsg(items.length>0?t(`找到 ${items.length} 个，点击选择`,`Found ${items.length}, click to select`):t(`钱包中无可用${type==='apostle'?'使徒':'钻头'}`,`No ${type} in wallet`))
+    }catch(e){setPickerMsg(t('加载失败: ','Load failed: ')+e.message)}
   }
 
   // ── 放置处理 ─────────────────────────────────────────────────────────────
   async function handlePlace(item) {
-    if(!wc||!address){alert('请先连接钱包');return}
+    if(!wc||!address){alert(t('请先连接钱包','Please connect wallet'));return}
     const type=picker, landId=sel
 
     // 第一步：选了使徒 → 弹出"选择钻头（可选）"
     if(type==='apostle'){
       window._selApo=item
       setPicker('drill-optional')
-      setPickerItems([]); setPickerMsg('扫描钻头...')
+      setPickerItems([]); setPickerMsg(t('扫描钻头...','Scanning drills...'))
       try{
         const drills=await scanWalletNFTs('drill')
         setPickerItems(drills)
         setPickerMsg(drills.length>0
           ? `已选使徒#${item.id}，可选配钻头（或点"不带钻头"直接放置）`
           : `已选使徒#${item.id}，钱包无钻头，将直接放置`)
-      }catch(e){setPickerMsg('已选使徒#'+item.id+'，将直接放置（无钻头）')}
+      }catch(e){setPickerMsg(t('已选使徒，将直接放置（无钻头）','Selected apostle, placing without drill'))}
       return
     }
 
@@ -749,25 +751,25 @@ export default function WorldMap() {
 
   // "不带钻头"直接放置
   async function placeWithoutDrill() {
-    if(!window._selApo){setPickerMsg('❌ 请先选择使徒');return}
+    if(!window._selApo){setPickerMsg(t('❌ 请先选择使徒','❌ Please select apostle first'));return}
     await doStartMining(sel, window._selApo, null)
   }
 
   // 核心放置函数
   async function doStartMining(landId, apo, drl) {
-    if(!apo){setPickerMsg('❌ 未选择使徒');return}
-    setPickerMsg('检查授权...')
+    if(!apo){setPickerMsg(t('❌ 未选择使徒','❌ No apostle selected'));return}
+    setPickerMsg(t('检查授权...','Checking approval...'))
     try{
       // 授权使徒
       if(!await pc.readContract({address:CONTRACTS.apostle,abi:NFT_ABI_WM,functionName:'isApprovedForAll',args:[address,CONTRACTS.mining]})){
-        setPickerMsg('授权使徒合约...')
+        setPickerMsg(t('授权使徒合约...','Approving apostle contract...'))
         const h=await wc.sendTransaction({to:CONTRACTS.apostle,data:encodeFunctionData({abi:APO_ABI_WM,functionName:'setApprovalForAll',args:[CONTRACTS.mining,true]})})
         await pc.waitForTransactionReceipt({hash:h})
       }
       // 如果带钻头，授权钻头
       if(drl){
         if(!await pc.readContract({address:CONTRACTS.drill,abi:NFT_ABI_WM,functionName:'isApprovedForAll',args:[address,CONTRACTS.mining]})){
-          setPickerMsg('授权钻头合约...')
+          setPickerMsg(t('授权钻头合约...','Approving drill contract...'))
           const h=await wc.sendTransaction({to:CONTRACTS.drill,data:encodeFunctionData({abi:DRL_ABI_WM,functionName:'setApprovalForAll',args:[CONTRACTS.mining,true]})})
           await pc.waitForTransactionReceipt({hash:h})
         }
@@ -786,18 +788,18 @@ export default function WorldMap() {
           }catch{}
         }
         if(!weakestApoId||apo.strength<=weakestStr){
-          setPickerMsg(`❌ 槽位已满，力量(${apo.strength})需高于最弱使徒(${weakestStr})`); return
+          setPickerMsg(t(`❌ 槽位已满，力量(${apo.strength})需高于最弱使徒(${weakestStr})`,`❌ Slots full, STR(${apo.strength}) must beat weakest(${weakestStr})`)); return
         }
-        setPickerMsg(`挤出力量${weakestStr}的使徒...`)
+        setPickerMsg(t(`挤出力量${weakestStr}的使徒...`,`Removing weakest apostle(STR${weakestStr})...`))
         const sh=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),weakestApoId]})})
         await pc.waitForTransactionReceipt({hash:sh})
       }
       // startMining — drillId=0 表示不带钻头
       const drillId = drl ? BigInt(drl.id) : 0n
-      setPickerMsg(drl?`放置使徒#${apo.id}+钻头#${drl.id}...`:`放置使徒#${apo.id}（无钻头）...`)
+      setPickerMsg(drl?t(`放置使徒#${apo.id}+钻头#${drl.id}...`,`Placing apostle#${apo.id}+drill#${drl.id}...`):t(`放置使徒#${apo.id}（无钻头）...`,`Placing apostle#${apo.id}(no drill)...`))
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'startMining',args:[BigInt(landId),BigInt(apo.id),drillId]})})
       await pc.waitForTransactionReceipt({hash:h})
-      setPickerMsg('✅ 放置成功！')
+      setPickerMsg(t('✅ 放置成功！','✅ Placed!'))
       window._selApo=null; window._selDrl=null
       setTimeout(()=>setPicker(null),1000)
       // 刷新槽位
@@ -828,7 +830,7 @@ export default function WorldMap() {
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:'stopMining',args:[BigInt(landId),apostleId]})})
       await pc.waitForTransactionReceipt({hash:h})
       await refreshSlots(landId)
-    }catch(e){alert('停止失败: '+(e.shortMessage||e.message))}
+    }catch(e){alert(t('停止失败: ','Stop failed: ')+(e.shortMessage||e.message))}
   }
 
   // ── 领取资源 ─────────────────────────────────────────────────────
@@ -841,13 +843,13 @@ export default function WorldMap() {
     try{
       const h=await wc.sendTransaction({to:CONTRACTS.mining,data:encodeFunctionData({abi:MINING_ABI,functionName:fn,args:[BigInt(landId)]})})
       await pc.waitForTransactionReceipt({hash:h})
-      alert(isLandOwner ? '✅ 领取成功！（地块持有者收益+手续费）' : '✅ 领取成功！（矿工收益）')
+      alert(t('✅ 领取成功！','✅ Claimed!'))
     }catch(e){
       const m=e.shortMessage||e.message||''
       if(m.includes('internal')||m.includes('Internal')){
-        alert('❌ 领取失败：奖励池余额不足，请联系管理员在「管理员工具」→「充值奖励池」进行充值')
+        alert(t('❌ 领取失败：奖励池余额不足','❌ Claim failed: reward pool empty'))
       } else {
-        alert('领取失败: '+m)
+        alert(t('领取失败: ','Claim failed: ')+m)
       }
     }
   }
@@ -863,13 +865,13 @@ export default function WorldMap() {
         {/* 顶部状态栏 */}
         <div className="wm-topbar">
           <div className="wm-topbar-l">
-            <span className="wm-badge">🌐 哥伦布大陆</span>
-            <span className="wm-minted">已铸造 <b>{minted}</b> / 10,000</span>
-            {loading&&<span className="wm-spin-wrap"><span className="wm-spinner"/>刷新中</span>}
+            <span className="wm-badge">🌐 {t('哥伦布大陆','Columbus')}</span>
+            <span className="wm-minted">{t('已铸造','Minted')} <b>{minted}</b> / 10,000</span>
+            {loading&&<span className="wm-spin-wrap"><span className="wm-spinner"/>{t('刷新中','Refreshing')}</span>}
           </div>
           <div className="wm-topbar-r">
             <div className="wm-filters">
-              {[['all','全部'],['mine','我的'],['auction','拍卖中']].map(([v,l])=>(
+              {[[`all`,t('全部','All')],[`mine`,t('我的','Mine')],[`auction`,t('拍卖中','Auction')]].map(([v,l])=>(
                 <button key={v} className={`wm-filter${filter===v?' on':''}`} onClick={()=>setFilter(v)}>{l}</button>
               ))}
             </div>
@@ -894,7 +896,7 @@ export default function WorldMap() {
         {hovCell&&(
           <div className="wm-tooltip" style={{left:hovPos.x+14,top:hovPos.y-36}}>
             ({hovCell.col},{hovCell.row})
-            {hovCell.isMe?' ★ 我的':hovCell.auc?' 🔨拍卖':hovCell.own?' 已有主':' 未铸造'}
+            {hovCell.isMe?` ★ ${t('我的','Mine')}`:hovCell.auc?` 🔨${t('拍卖','Auction')}`:hovCell.own?` ${t('已有主','Owned')}`:` ${t('未铸造','Unminted')}`}
           </div>
         )}
       </div>
@@ -903,35 +905,35 @@ export default function WorldMap() {
       {sel!=null&&(
         <aside className="wm-panel">
           <div className="wm-panel-head">
-            <span className="wm-panel-id">土地 #{sel}</span>
+            <span className="wm-panel-id">{t('土地','Land')} #{sel}</span>
             {selOwner&&<span className={`wm-panel-tag${isMe?' me':selAuc?' auc':''}`}>
-              {isMe?'⭐ 我的':selAuc?'🔨 拍卖中':'已有主'}
+              {isMe?`⭐ ${t('我的','Mine')}`:selAuc?`🔨 ${t('拍卖中','Auction')}`:t('已有主','Owned')}
             </span>}
             <button className="wm-panel-close" onClick={()=>{setSel(null);setEditingMeta(false);setMetaMsg('')}}>✕</button>
           </div>
           <div className="wm-panel-body">
             <div className="wm-sec">
-              <div className="wm-sec-title">属性 (ATTRIBUTES)</div>
-              <div className="wm-kv"><span>类型</span><span>{selOwner?'普通地块':'未铸造'}</span></div>
-              <div className="wm-kv"><span>大陆</span><span>哥伦布大陆</span></div>
+              <div className="wm-sec-title">{t('属性','Attributes')}</div>
+              <div className="wm-kv"><span>{t('类型','Type')}</span><span>{selOwner?t('普通地块','Normal Land'):t('未铸造','Unminted')}</span></div>
+              <div className="wm-kv"><span>{t('大陆','Continent')}</span><span>{t('哥伦布大陆','Columbus')}</span></div>
             </div>
             {selAuc&&(
               <div className="wm-sec">
-                <div className="wm-sec-title">拍卖 (AUCTION)</div>
-                <div className="wm-kv"><span>起拍价</span><span>{fmtRing(selAuc.startPrice)} RING</span></div>
-                <div className="wm-kv"><span>底价</span><span>{fmtRing(selAuc.endPrice)} RING</span></div>
-                <div className="wm-kv"><span>当前价</span><span className="wm-price-val">{fmtRing(selPrice)} RING</span></div>
-                {!isMe&&<button className="wm-btn-buy" onClick={()=>window.dispatchEvent(new CustomEvent('nav',{detail:{page:'market',tab:'land'}}))}>💰 购买</button>}
+                <div className="wm-sec-title">{t('拍卖','Auction')}</div>
+                <div className="wm-kv"><span>{t('起拍价','Start Price')}</span><span>{fmtRing(selAuc.startPrice)} RING</span></div>
+                <div className="wm-kv"><span>{t('底价','Floor')}</span><span>{fmtRing(selAuc.endPrice)} RING</span></div>
+                <div className="wm-kv"><span>{t('当前价','Current')}</span><span className="wm-price-val">{fmtRing(selPrice)} RING</span></div>
+                {!isMe&&<button className="wm-btn-buy" onClick={()=>window.dispatchEvent(new CustomEvent('nav',{detail:{page:'market',tab:'land'}}))}>{t('💰 购买','💰 Buy')}</button>}
               </div>
             )}
             <div className="wm-sec">
               <div className="wm-sec-title" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span>信息 (INFORMATION)</span>
+                <span>{t('信息','Information')}</span>
                 {isMe && !editingMeta && (
                   <button className="wm-btn-sm" onClick={()=>{
                     setMetaForm({avatarUrl:selMeta?.avatarUrl||'',description:selMeta?.description||''})
                     setMetaMsg(''); setEditingMeta(true)
-                  }}>✏️ 编辑</button>
+                  }}>{t('✏️ 编辑','✏️ Edit')}</button>
                 )}
               </div>
 
@@ -949,10 +951,10 @@ export default function WorldMap() {
                   <div style={{flex:1,minWidth:0}}>
                     {selMeta?.description
                       ? <p style={{color:'#9080b0',fontSize:'.75rem',lineHeight:1.5,margin:'0 0 6px',wordBreak:'break-all'}}>{selMeta.description}</p>
-                      : <span style={{color:'#3a2a6a',fontSize:'.73rem'}}>暂无介绍{isMe?' — 点击编辑添加':''}</span>
+                      : <span style={{color:'#3a2a6a',fontSize:'.73rem'}}>{t('暂无介绍','No description')}{isMe?` — ${t('点击编辑添加','Click to add')}`:''}</span>
                     }
-                    <div className="wm-kv"><span>坐标</span><span>({selCol}, {selRow})</span></div>
-                    <div className="wm-kv"><span>所有者</span>
+                    <div className="wm-kv"><span>{t('坐标','Coord')}</span><span>({selCol}, {selRow})</span></div>
+                    <div className="wm-kv"><span>{t('所有者','Owner')}</span>
                       {selOwner
                         ?<a className="wm-addr" href={`https://testnet.bscscan.com/address/${selOwner}`} target="_blank" rel="noreferrer">{fmtAddr(selOwner)}</a>
                         :<span className="wm-dim">—</span>}
@@ -965,10 +967,10 @@ export default function WorldMap() {
               {editingMeta && isMe && (
                 <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:4}}>
                   <div>
-                    <div style={{fontSize:'.7rem',color:'#5040a0',marginBottom:3}}>头像图片 URL（不超过 256 字符）</div>
+                    <div style={{fontSize:'.7rem',color:'#5040a0',marginBottom:3}}>{t('头像图片 URL（不超过 256 字符）','Avatar URL (max 256 chars)')}</div>
                     <input
                       style={{width:'100%',boxSizing:'border-box',background:'#0a0818',border:'1px solid #2a1a5a',borderRadius:6,color:'#c0b0e0',padding:'.4rem .6rem',fontSize:'.78rem'}}
-                      placeholder="https://... 图片链接"
+                      placeholder={t('https://... 图片链接','https://... image URL')}
                       value={metaForm.avatarUrl}
                       onChange={e=>setMetaForm(f=>({...f,avatarUrl:e.target.value}))}
                       maxLength={256}
@@ -981,10 +983,10 @@ export default function WorldMap() {
                     )}
                   </div>
                   <div>
-                    <div style={{fontSize:'.7rem',color:'#5040a0',marginBottom:3}}>土地简介（不超过 1000 字符）</div>
+                    <div style={{fontSize:'.7rem',color:'#5040a0',marginBottom:3}}>{t('土地简介（不超过 1000 字符）','Land description (max 1000 chars)')}</div>
                     <textarea
                       style={{width:'100%',boxSizing:'border-box',background:'#0a0818',border:'1px solid #2a1a5a',borderRadius:6,color:'#c0b0e0',padding:'.4rem .6rem',fontSize:'.78rem',minHeight:72,resize:'vertical',fontFamily:'inherit'}}
-                      placeholder="描述这块土地的故事、特色..."
+                      placeholder={t('描述这块土地的故事、特色...','Describe this land...')}
                       value={metaForm.description}
                       onChange={e=>setMetaForm(f=>({...f,description:e.target.value}))}
                       maxLength={1000}
@@ -1000,7 +1002,7 @@ export default function WorldMap() {
                     <button
                       style={{flex:1,padding:'.45rem',background:'linear-gradient(135deg,#4a1a9a,#7a30cc)',border:'none',borderRadius:7,color:'#fff',fontSize:'.8rem',cursor:'pointer',fontWeight:600,opacity:metaBusy?0.5:1}}
                       onClick={handleSaveMeta} disabled={metaBusy}>
-                      {metaBusy ? '上链中...' : '💾 保存上链'}
+                      {metaBusy ? t('上链中...','Saving...') : t('💾 保存上链','💾 Save On-chain')}
                     </button>
                     <button
                       style={{padding:'.45rem .9rem',background:'#1a1040',border:'1px solid #2a1a5a',borderRadius:7,color:'#7060a0',fontSize:'.8rem',cursor:'pointer'}}
@@ -1012,7 +1014,7 @@ export default function WorldMap() {
               )}
             </div>
             <div className="wm-sec">
-              <div className="wm-sec-title">资源 (RESOURCES) <span className="wm-hint">每日最大挖矿量</span></div>
+              <div className="wm-sec-title">{t('资源','Resources')} <span className="wm-hint">{t('每日最大挖矿量','Max Daily Mining')}</span></div>
               {selOwner
                 ?ELEMS.map((el,i)=>(
                   <div key={el.k} className="wm-res">
@@ -1022,12 +1024,12 @@ export default function WorldMap() {
                     <span className="wm-res-v">{selVals[i]}</span>
                   </div>
                 ))
-                :<div className="wm-dim" style={{fontSize:'.8rem'}}>铸造后显示属性</div>
+                :<div className="wm-dim" style={{fontSize:'.8rem'}}>{t('铸造后显示属性','Attributes shown after minting')}</div>
               }
             </div>
             {selOwner&&selRewards.length>0&&(
               <div className="wm-sec">
-                <div className="wm-sec-title">已挖资源 (MINED)</div>
+                <div className="wm-sec-title">{t('已挖资源','Mined Resources')}</div>
                 {ELEMS.map((el,i)=>(
                   <div key={el.k} className="wm-res">
                     <span className="wm-res-ico">{el.i}</span>
@@ -1035,16 +1037,16 @@ export default function WorldMap() {
                     <span className="wm-res-v" style={{marginLeft:'auto'}}>{fmtRing(selRewards[i])}</span>
                   </div>
                 ))}
-                {isMe&&<button className="wm-btn-claim" onClick={()=>handleClaim(sel)}>💰 领取资源 (Claim)</button>}
+                {isMe&&<button className="wm-btn-claim" onClick={()=>handleClaim(sel)}>{t('💰 领取资源','💰 Claim Resources')}</button>}
               </div>
             )}
             <div className="wm-sec">
               <div className="wm-sec-title">
-                使徒工作区 (APOSTLE WORKSPACE)
+                t('使徒工作区','Apostle Workspace')
                 {/* 任何已铸造地块 + 已连钱包 都可以放置使徒 */}
                 {selOwner && address && <button className="wm-btn-sm" onClick={()=>openPicker('apostle')}>＋ 放置</button>}
               </div>
-              {!selOwner && <div className="wm-dim" style={{fontSize:'.78rem',padding:'4px 0'}}>地块需先铸造才能挖矿</div>}
+              {!selOwner && <div className="wm-dim" style={{fontSize:'.78rem',padding:'4px 0'}}>{t('地块需先铸造才能挖矿','Land must be minted before mining')}</div>}
               <div className="wm-slots">
                 {[0,1,2,3,4].map(i=>{const s=selSlots[i];
                   const slotCnt = selSlots.length
@@ -1071,7 +1073,7 @@ export default function WorldMap() {
               </div>
             </div>
             <div className="wm-sec">
-              <div className="wm-sec-title">钻头工作区 (DRILLS WORKSPACE)</div>
+              <div className="wm-sec-title">t('钻头工作区','Drill Workspace')</div>
               <div className="wm-slots">
                 {[0,1,2,3,4].map(i=>{const s=selSlots[i];return(
                   <div key={i} className={`wm-slot${s?' used':''}`}>
@@ -1088,7 +1090,7 @@ export default function WorldMap() {
             </div>
             {isMe&&(
               <div className="wm-sec" style={{paddingBottom:'.5rem'}}>
-                <button className="wm-btn-claim" onClick={()=>handleClaim(sel)}>💰 领取资源 (Claim)</button>
+                <button className="wm-btn-claim" onClick={()=>handleClaim(sel)}>{t('💰 领取资源','💰 Claim Resources')}</button>
               </div>
             )}
             {/* 放置选择器弹窗 */}
@@ -1096,8 +1098,8 @@ export default function WorldMap() {
               <div className="wm-picker-overlay" onClick={()=>{setPicker(null);window._selApo=null;window._selDrl=null}}>
                 <div className="wm-picker" onClick={e=>e.stopPropagation()}>
                   <div className="wm-picker-head">
-                    {picker==='apostle'&&'选择使徒（必选）'}
-                    {picker==='drill-optional'&&`为使徒 #${window._selApo?.id} 选择钻头（可选）`}
+                    {picker==='apostle'&&t('选择使徒（必选）','Select Apostle (required)')}
+                    {picker==='drill-optional'&&t(`为使徒 #${window._selApo?.id} 选择钻头（可选）`,`Select drill for Apostle #${window._selApo?.id} (optional)`)}
                     <button onClick={()=>{setPicker(null);window._selApo=null;window._selDrl=null}}>✕</button>
                   </div>
                   {pickerMsg&&<div className="wm-picker-msg" style={{color:pickerMsg.startsWith('❌')?'#f06070':'#9070d0'}}>{pickerMsg}</div>}
@@ -1106,13 +1108,13 @@ export default function WorldMap() {
                     <div style={{padding:'.5rem 1rem .25rem',borderBottom:'1px solid #2a2040'}}>
                       <button style={{width:'100%',padding:'.4rem',background:'#2a1a40',border:'1px solid #5040a0',borderRadius:8,color:'#a080d0',fontSize:'.8rem',cursor:'pointer'}}
                         onClick={placeWithoutDrill}>
-                        ⚡ 不带钻头，直接放置使徒
+                        {t('⚡ 不带钻头，直接放置使徒','⚡ Place apostle without drill')}
                       </button>
                     </div>
                   )}
                   {pickerItems.length===0&&!pickerMsg.includes('扫描')
                     ?<div style={{padding:'1rem',color:'#5040a0',textAlign:'center'}}>
-                        {picker==='apostle'?'钱包中无可用使徒':'钱包中无可用钻头'}
+                        {picker==='apostle'?t('钱包中无可用使徒','No apostles in wallet'):t('钱包中无可用钻头','No drills in wallet')}
                       </div>
                     :<div className="wm-picker-grid">
                       {pickerItems.map(item=>(
